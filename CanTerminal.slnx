@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/CanTerminal.App/CanTerminal.App.csproj" />
+    <Project Path="src/CanTerminal.Core/CanTerminal.Core.csproj" />
+    <Project Path="src/CanTerminal.Mcp/CanTerminal.Mcp.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/CanTerminal.SmokeTest/CanTerminal.SmokeTest.csproj" />
+  </Folder>
+</Solution>

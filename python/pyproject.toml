@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "canterminal-can"
+version = "1.0.0"
+description = "python-can backend and raw client for the CanTerminal ValueCAN monitor"
+requires-python = ">=3.9"
+dependencies = []
+
+[project.optional-dependencies]
+can = ["python-can>=4.0"]
+
+[project.entry-points."can.interface"]
+canterminal = "canterminal_can.bus:CanTerminalBus"
+
+[tool.setuptools.packages.find]
+include = ["canterminal_can*"]

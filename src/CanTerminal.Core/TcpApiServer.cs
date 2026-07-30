@@ -1,0 +1,304 @@
+using System.Net;
+using System.Net.Sockets;
+using System.Text;
+using System.Text.Json;
+using System.Text.Json.Nodes;
+using System.Threading.Channels;
+
+namespace CanTerminal.Core;
+
+public sealed record ApiStatus(bool Connected, string? Adapter, IReadOnlyList<string> Channels, string? DbcPath);
+
+/// <summary>
+/// Loopback TCP remote-control API: newline-delimited JSON, UTF-8.
+///
+/// Requests (optional "seq" is echoed back on the matching response):
+///   {"op":"hello"} {"op":"status"} {"op":"ping"}
+///   {"op":"send","channel":"CAN1","id":"123","data":"AABB","ext":false,"fd":false,"brs":false}
+///   {"op":"subscribe","channels":["CAN1"],"ids":[291]}   (both filters optional)
+///   {"op":"unsubscribe"}
+///   {"op":"recent","count":100,"channel":"CAN1","id":291}
+///   {"op":"waitfor","id":291,"channel":"CAN1","timeoutMs":1000}
+/// Pushed while subscribed: {"op":"rx","frame":{...}}  (includes TX frames, see frame.dir)
+/// </summary>
+public sealed class TcpApiServer : IDisposable
+{
+    public delegate void SendHandler(string channel, uint arbId, byte[] data, bool ext, bool fd, bool brs, string source);
+
+    private readonly MessageHub _hub;
+    private readonly DbcDecoder? _dbc;
+    private TcpListener? _listener;
+    private CancellationTokenSource? _cts;
+    private readonly List<Client> _clients = [];
+    private readonly object _clientsLock = new();
+
+    private sealed class Client
+    {
+        public required TcpClient Tcp;
+        public required Channel<string> Outbox;
+        public volatile bool Subscribed;
+        public HashSet<string>? ChannelFilter;
+        public HashSet<uint>? IdFilter;
+        public string Name = "?";
+    }
+
+    public TcpApiServer(MessageHub hub, DbcDecoder? dbc = null)
+    {
+        _hub = hub;
+        _dbc = dbc;
+    }
+
+    public SendHandler? OnSend { get; set; }
+    public Func<ApiStatus>? StatusProvider { get; set; }
+    public event Action<string>? Info;
+
+    public int Port { get; private set; }
+    public bool IsRunning => _listener != null;
+
+    public int ClientCount
+    {
+        get { lock (_clientsLock) return _clients.Count; }
+    }
+
+    public void Start(int port = 29536)
+    {
+        if (_listener != null) return;
+        _cts = new CancellationTokenSource();
+        _listener = new TcpListener(IPAddress.Loopback, port);
+        _listener.Start();
+        Port = port;
+        _hub.FrameObserved += OnFrame;
+        _ = AcceptLoop(_cts.Token);
+        Info?.Invoke($"API server listening on 127.0.0.1:{port}");
+    }
+
+    public void Stop()
+    {
+        if (_listener == null) return;
+        _hub.FrameObserved -= OnFrame;
+        _cts?.Cancel();
+        _listener.Stop();
+        _listener = null;
+        lock (_clientsLock)
+        {
+            foreach (var c in _clients) { try { c.Tcp.Close(); } catch { } }
+            _clients.Clear();
+        }
+        Info?.Invoke("API server stopped");
+    }
+
+    private async Task AcceptLoop(CancellationToken ct)
+    {
+        var listener = _listener!;
+        while (!ct.IsCancellationRequested)
+        {
+            TcpClient tcp;
+            try { tcp = await listener.AcceptTcpClientAsync(ct).ConfigureAwait(false); }
+            catch { break; }
+
+            tcp.NoDelay = true;
+            var client = new Client
+            {
+                Tcp = tcp,
+                Outbox = Channel.CreateBounded<string>(new BoundedChannelOptions(100_000)
+                {
+                    FullMode = BoundedChannelFullMode.DropOldest,
+                    SingleReader = true,
+                }),
+                Name = tcp.Client.RemoteEndPoint?.ToString() ?? "?",
+            };
+            lock (_clientsLock) _clients.Add(client);
+            Info?.Invoke($"Client connected: {client.Name}");
+            _ = HandleClient(client, ct);
+        }
+    }
+
+    private async Task HandleClient(Client client, CancellationToken ct)
+    {
+        var stream = client.Tcp.GetStream();
+        var writerTask = Task.Run(async () =>
+        {
+            try
+            {
+                await foreach (var line in client.Outbox.Reader.ReadAllAsync(ct).ConfigureAwait(false))
+                {
+                    var bytes = Encoding.UTF8.GetBytes(line + "\n");
+                    await stream.WriteAsync(bytes, ct).ConfigureAwait(false);
+                }
+            }
+            catch { }
+        }, ct);
+
+        try
+        {
+            using var reader = new StreamReader(stream, Encoding.UTF8, false, 1 << 16, leaveOpen: true);
+            while (!ct.IsCancellationRequested)
+            {
+                var line = await reader.ReadLineAsync(ct).ConfigureAwait(false);
+                if (line is null) break;
+                if (string.IsNullOrWhiteSpace(line)) continue;
+
+                string response;
+                try { response = await HandleRequest(client, line).ConfigureAwait(false); }
+                catch (Exception ex) { response = Err(null, ex.Message); }
+                client.Outbox.Writer.TryWrite(response);
+            }
+        }
+        catch { }
+        finally
+        {
+            lock (_clientsLock) _clients.Remove(client);
+            client.Outbox.Writer.TryComplete();
+            try { client.Tcp.Close(); } catch { }
+            Info?.Invoke($"Client disconnected: {client.Name}");
+            try { await writerTask.ConfigureAwait(false); } catch { }
+        }
+    }
+
+    private async Task<string> HandleRequest(Client client, string line)
+    {
+        var req = JsonNode.Parse(line)?.AsObject() ?? throw new InvalidOperationException("Invalid JSON.");
+        var seq = req["seq"];
+        string op = req["op"]?.GetValue<string>() ?? throw new InvalidOperationException("Missing 'op'.");
+
+        switch (op)
+        {
+            case "ping":
+                return Reply(seq, new JsonObject { ["op"] = "pong" });
+
+            case "hello":
+            case "status":
+            {
+                var st = StatusProvider?.Invoke() ?? new ApiStatus(false, null, [], null);
+                return Reply(seq, new JsonObject
+                {
+                    ["op"] = op == "hello" ? "hello" : "status",
+                    ["app"] = "CanTerminal",
+                    ["version"] = "1.0",
+                    ["connected"] = st.Connected,
+                    ["adapter"] = st.Adapter,
+                    ["channels"] = new JsonArray(st.Channels.Select(c => (JsonNode)c).ToArray()),
+                    ["dbc"] = st.DbcPath,
+                    ["totalFrames"] = _hub.TotalFrames,
+                    ["clients"] = ClientCount,
+                });
+            }
+
+            case "send":
+            {
+                var sender = OnSend ?? throw new InvalidOperationException("No device connected.");
+                string channel = req["channel"]?.GetValue<string>() ?? "CAN1";
+                uint id = ParseId(req["id"] ?? throw new InvalidOperationException("Missing 'id'."));
+                byte[] data = Convert.FromHexString(req["data"]?.GetValue<string>() ?? "");
+                bool ext = req["ext"]?.GetValue<bool>() ?? id > 0x7FF;
+                bool fd = req["fd"]?.GetValue<bool>() ?? false;
+                bool brs = req["brs"]?.GetValue<bool>() ?? false;
+                sender(channel, id, data, ext, fd, brs, $"tcp:{client.Name}");
+                return Reply(seq, new JsonObject { ["op"] = "ok" });
+            }
+
+            case "subscribe":
+                client.ChannelFilter = req["channels"] is JsonArray chs && chs.Count > 0
+                    ? chs.Select(c => c!.GetValue<string>().ToUpperInvariant()).ToHashSet()
+                    : null;
+                client.IdFilter = req["ids"] is JsonArray ids && ids.Count > 0
+                    ? ids.Select(ParseIdNode).ToHashSet()
+                    : null;
+                client.Subscribed = true;
+                return Reply(seq, new JsonObject { ["op"] = "ok" });
+
+            case "unsubscribe":
+                client.Subscribed = false;
+                return Reply(seq, new JsonObject { ["op"] = "ok" });
+
+            case "recent":
+            {
+                int count = Math.Clamp(req["count"]?.GetValue<int>() ?? 100, 1, 10_000);
+                string? channel = req["channel"]?.GetValue<string>()?.ToUpperInvariant();
+                uint? id = req["id"] is JsonNode idNode ? ParseId(idNode) : null;
+                var frames = _hub.GetRecent(count, f =>
+                    (channel is null || f.Channel == channel) &&
+                    (id is null || f.ArbId == id.Value));
+                var arr = new JsonArray();
+                foreach (var f in frames) arr.Add(FrameJson(f));
+                return Reply(seq, new JsonObject { ["op"] = "recent", ["frames"] = arr });
+            }
+
+            case "waitfor":
+            {
+                uint id = ParseId(req["id"] ?? throw new InvalidOperationException("Missing 'id'."));
+                string? channel = req["channel"]?.GetValue<string>()?.ToUpperInvariant();
+                int timeoutMs = Math.Clamp(req["timeoutMs"]?.GetValue<int>() ?? 5000, 1, 300_000);
+                var frame = await _hub.WaitForAsync(
+                    f => f.ArbId == id && (channel is null || f.Channel == channel) && f.Direction == FrameDirection.Rx,
+                    TimeSpan.FromMilliseconds(timeoutMs)).ConfigureAwait(false);
+                return frame is null
+                    ? Reply(seq, new JsonObject { ["op"] = "timeout" })
+                    : Reply(seq, new JsonObject { ["op"] = "frame", ["frame"] = FrameJson(frame) });
+            }
+
+            default:
+                return Err(seq, $"Unknown op '{op}'.");
+        }
+    }
+
+    private void OnFrame(CanFrame f)
+    {
+        List<Client> targets;
+        lock (_clientsLock)
+        {
+            if (_clients.Count == 0) return;
+            targets = _clients.Where(c => c.Subscribed
+                && (c.ChannelFilter is null || c.ChannelFilter.Contains(f.Channel))
+                && (c.IdFilter is null || c.IdFilter.Contains(f.ArbId))).ToList();
+        }
+        if (targets.Count == 0) return;
+
+        var msg = new JsonObject { ["op"] = "rx", ["frame"] = FrameJson(f) }
+            .ToJsonString(JsonSerializerOptions.Default);
+        foreach (var c in targets) c.Outbox.Writer.TryWrite(msg);
+    }
+
+    private JsonObject FrameJson(CanFrame f) => new()
+    {
+        ["ts"] = Math.Round(f.Timestamp, 6),
+        ["channel"] = f.Channel,
+        ["id"] = f.ArbId,
+        ["idHex"] = f.IdText,
+        ["ext"] = f.IsExtended,
+        ["fd"] = f.IsFd,
+        ["brs"] = f.IsBrs,
+        ["rtr"] = f.IsRemote,
+        ["err"] = f.IsError,
+        ["dir"] = f.Direction == FrameDirection.Tx ? "tx" : "rx",
+        ["data"] = f.DataText,
+        ["decoded"] = _dbc?.IsLoaded == true ? _dbc.Decode(f) : null,
+    };
+
+    private static uint ParseId(JsonNode node) => ParseIdNode(node);
+
+    private static uint ParseIdNode(JsonNode? node) => node switch
+    {
+        null => throw new InvalidOperationException("Missing id."),
+        JsonValue v when v.TryGetValue<uint>(out var n) => n,
+        JsonValue v when v.TryGetValue<string>(out var s) =>
+            uint.Parse(s.StartsWith("0x", StringComparison.OrdinalIgnoreCase) ? s[2..] : s,
+                System.Globalization.NumberStyles.HexNumber),
+        _ => throw new InvalidOperationException("Invalid id."),
+    };
+
+    private static string Reply(JsonNode? seq, JsonObject obj)
+    {
+        if (seq != null) obj["seq"] = seq.DeepClone();
+        return obj.ToJsonString(JsonSerializerOptions.Default);
+    }
+
+    private static string Err(JsonNode? seq, string message)
+    {
+        var obj = new JsonObject { ["op"] = "error", ["message"] = message };
+        if (seq != null) obj["seq"] = seq.DeepClone();
+        return obj.ToJsonString(JsonSerializerOptions.Default);
+    }
+
+    public void Dispose() => Stop();
+}
