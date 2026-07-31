@@ -7,6 +7,7 @@
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
@@ -62,14 +63,46 @@
                 <RadioButton x:Name="TraceRadio" Content="Trace" IsChecked="True" VerticalAlignment="Center" Checked="ViewMode_Changed"/>
                 <RadioButton x:Name="FixedRadio" Content="Fixed" Margin="8,0,0,0" VerticalAlignment="Center" Checked="ViewMode_Changed"/>
                 <CheckBox x:Name="AutoScrollCheck" Content="Autoscroll" IsChecked="True"/>
-                <CheckBox x:Name="PauseCheck" Content="Pause"/>
+                <CheckBox x:Name="HighlightCheck" Content="Highlight changes" IsChecked="True"
+                          Unchecked="HighlightCheck_Changed"
+                          ToolTip="In the Fixed view, briefly highlight data bytes whose value changed."/>
+                <CheckBox x:Name="PauseCheck" Content="Pause"
+                          ToolTip="Pauses the view; frames arriving while paused are not shown after resume (still queryable via recent / the TCP API)."/>
                 <Button x:Name="ClearButton" Content="Clear" Click="ClearButton_Click"/>
                 <Button x:Name="SaveButton" Content="Save CSV…" Click="SaveButton_Click"/>
             </WrapPanel>
         </Border>
 
+        <!-- protocol profile toolbar -->
+        <Border Grid.Row="2" BorderBrush="#DDD" BorderThickness="0,0,0,1" Padding="6,5" Background="#F3F6FA">
+            <WrapPanel>
+                <Label Content="Profile:" FontWeight="Bold"/>
+                <ComboBox x:Name="ProfileCombo" Width="90" SelectedIndex="0" SelectionChanged="Profile_Changed">
+                    <ComboBoxItem Content="None"/>
+                    <ComboBoxItem Content="XCP"/>
+                </ComboBox>
+                <StackPanel x:Name="XcpPanel" Orientation="Horizontal" Visibility="Collapsed">
+                    <Label Content="Req ID(hex):"/>
+                    <TextBox x:Name="XcpReqBox" Width="70" Text="701" FontFamily="Consolas"
+                             ToolTip="CAN ID the master sends commands on (CMD)"/>
+                    <Label Content="Rsp ID(hex):"/>
+                    <TextBox x:Name="XcpRspBox" Width="70" Text="702" FontFamily="Consolas"
+                             ToolTip="CAN ID the slave answers and sends DAQ-DTOs on (RES/DAQ)"/>
+                    <Button x:Name="XcpApplyButton" Content="Apply" Click="XcpApply_Click"/>
+                    <Button x:Name="XcpDetectButton" Content="Detect" Click="XcpDetect_Click"
+                            ToolTip="Scan captured traffic for a CONNECT or GET_SLAVE_ID exchange. Sends nothing on the bus."/>
+                    <Button x:Name="XcpA2lButton" Content="From A2L…" Click="XcpA2l_Click"
+                            ToolTip="Read CAN_ID_MASTER / CAN_ID_SLAVE from an A2L file's IF_DATA XCP_ON_CAN block."/>
+                    <CheckBox x:Name="XcpOnlyCheck" Content="XCP IDs only" VerticalAlignment="Center" Margin="10,0,0,0"
+                              Checked="XcpOnly_Changed" Unchecked="XcpOnly_Changed"
+                              ToolTip="Hide everything except the XCP request/response IDs. Applies to frames captured from now on; the Fixed view is reset."/>
+                </StackPanel>
+                <TextBlock x:Name="XcpStatusText" VerticalAlignment="Center" Margin="8,0" Foreground="Gray"/>
+            </WrapPanel>
+        </Border>
+
         <!-- trace view -->
-        <ListView x:Name="TraceList" Grid.Row="2" FontFamily="Consolas" FontSize="12"
+        <ListView x:Name="TraceList" Grid.Row="3" FontFamily="Consolas" FontSize="12"
                   VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling">
             <ListView.View>
                 <GridView>
@@ -79,14 +112,15 @@
                     <GridViewColumn Header="ID" Width="80" DisplayMemberBinding="{Binding Id}"/>
                     <GridViewColumn Header="Flags" Width="70" DisplayMemberBinding="{Binding Flags}"/>
                     <GridViewColumn Header="DLC" Width="38" DisplayMemberBinding="{Binding Dlc}"/>
-                    <GridViewColumn Header="Data" Width="420" DisplayMemberBinding="{Binding Data}"/>
-                    <GridViewColumn Header="Decoded" Width="360" DisplayMemberBinding="{Binding Decoded}"/>
+                    <GridViewColumn Header="Data" Width="300" DisplayMemberBinding="{Binding Data}"/>
+                    <GridViewColumn Header="Frame type" Width="185" DisplayMemberBinding="{Binding Type}"/>
+                    <GridViewColumn Header="Comments" Width="460" DisplayMemberBinding="{Binding Decoded}"/>
                 </GridView>
             </ListView.View>
         </ListView>
 
         <!-- fixed (aggregate) view -->
-        <DataGrid x:Name="FixedGrid" Grid.Row="2" Visibility="Collapsed" AutoGenerateColumns="False"
+        <DataGrid x:Name="FixedGrid" Grid.Row="3" Visibility="Collapsed" AutoGenerateColumns="False"
                   IsReadOnly="True" FontFamily="Consolas" FontSize="12"
                   EnableRowVirtualization="True" HeadersVisibility="Column">
             <DataGrid.Columns>
@@ -96,13 +130,34 @@
                 <DataGridTextColumn Header="Count" Binding="{Binding Count}" Width="80"/>
                 <DataGridTextColumn Header="Period [ms]" Binding="{Binding PeriodMs}" Width="90"/>
                 <DataGridTextColumn Header="DLC" Binding="{Binding Dlc}" Width="45"/>
-                <DataGridTextColumn Header="Data" Binding="{Binding Data}" Width="420"/>
-                <DataGridTextColumn Header="Decoded" Binding="{Binding Decoded}" Width="*"/>
+                <!-- per-byte cells so a byte that just changed can carry its own fading highlight -->
+                <DataGridTemplateColumn Header="Data" Width="300" SortMemberPath="DataText">
+                    <DataGridTemplateColumn.CellTemplate>
+                        <DataTemplate>
+                            <ItemsControl ItemsSource="{Binding Bytes}">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <StackPanel Orientation="Horizontal"/>
+                                    </ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border Background="{Binding Background}" Margin="0,0,4,0" CornerRadius="2">
+                                            <TextBlock Text="{Binding Text}" Foreground="{Binding Foreground}"/>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </DataTemplate>
+                    </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+                <DataGridTextColumn Header="Frame type" Binding="{Binding Type}" Width="185"/>
+                <DataGridTextColumn Header="Comments" Binding="{Binding Decoded}" Width="*"/>
             </DataGrid.Columns>
         </DataGrid>
 
         <!-- status bar -->
-        <StatusBar Grid.Row="3">
+        <StatusBar Grid.Row="4">
             <StatusBarItem>
                 <TextBlock x:Name="ConnStatusText" Text="Disconnected" FontWeight="Bold"/>
             </StatusBarItem>

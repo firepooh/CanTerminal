@@ -12,9 +12,6 @@ public sealed class CanFrame
     /// <summary>Seconds, hardware timebase where available (device-relative, monotonic).</summary>
     public double Timestamp { get; init; }
 
-    /// <summary>PC wall clock when the frame was observed by this process.</summary>
-    public DateTime WallClock { get; init; } = DateTime.Now;
-
     public string Channel { get; init; } = "";
     public uint ArbId { get; init; }
     public bool IsExtended { get; init; }
@@ -27,6 +24,12 @@ public sealed class CanFrame
 
     /// <summary>Origin of a TX frame: "ui", "python", "mcp", or null for bus traffic.</summary>
     public string? Source { get; init; }
+
+    /// <summary>
+    /// Protocol interpretation, attached by <see cref="MessageHub"/> when the frame is published.
+    /// Adapters never set this.
+    /// </summary>
+    public FrameAnnotation? Annotation { get; internal set; }
 
     public string IdText => IsExtended ? ArbId.ToString("X8") : ArbId.ToString("X3");
     public string DataText => Convert.ToHexString(Data);

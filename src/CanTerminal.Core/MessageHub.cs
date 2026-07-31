@@ -20,12 +20,19 @@ public sealed class MessageHub
 
     public event Action<CanFrame>? FrameObserved;
 
+    /// <summary>
+    /// Optional protocol annotator. Runs under the ring lock so that stateful decoders (XCP)
+    /// see every frame exactly once, in the same order they are stored and dispatched.
+    /// </summary>
+    public Func<CanFrame, FrameAnnotation?>? Annotator { get; set; }
+
     public long TotalFrames => Interlocked.Read(ref _total);
 
     public void Publish(CanFrame frame)
     {
         lock (_lock)
         {
+            frame.Annotation = Annotator?.Invoke(frame);
             _ring[_head] = frame;
             _head = (_head + 1) % _ring.Length;
             if (_count < _ring.Length) _count++;

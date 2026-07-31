@@ -6,6 +6,7 @@ using System.Windows;
 using System.Windows.Threading;
 using CanTerminal.Core;
 using CanTerminal.Core.IcsNeo;
+using CanTerminal.Core.Xcp;
 using Microsoft.Win32;
 
 namespace CanTerminal.App;
@@ -17,24 +18,35 @@ public partial class MainWindow : Window
 
     private readonly MessageHub _hub = new();
     private readonly DbcDecoder _dbc = new();
+    private readonly FrameAnnotator _annotator;
     private readonly TcpApiServer _server;
     private ICanAdapter? _adapter;
 
     private readonly ConcurrentQueue<CanFrame> _pending = new();
     private ObservableCollection<TraceRow> _traceRows = [];
     private readonly ObservableCollection<FixedRow> _fixedRows = [];
-    private readonly Dictionary<(string Chan, uint Id, bool Ext), FixedRow> _fixedMap = [];
+    // Group is part of the key so XCP splits one CAN ID into per-ODT rows; it is 0 otherwise.
+    private readonly Dictionary<(string Chan, uint Id, bool Ext, int Group), FixedRow> _fixedMap = [];
 
     private readonly DispatcherTimer _flushTimer;
     private readonly DispatcherTimer _statusTimer;
     private readonly DispatcherTimer _periodicTimer;
     private long _lastTotal;
 
+    /// <summary>
+    /// Drives the change-highlight decay. Deliberately independent of frame timestamps: the
+    /// highlight has to keep fading in wall time even when the bus goes quiet.
+    /// </summary>
+    private readonly System.Diagnostics.Stopwatch _uiClock = System.Diagnostics.Stopwatch.StartNew();
+
     public MainWindow()
     {
         InitializeComponent();
 
-        _server = new TcpApiServer(_hub, _dbc)
+        _annotator = new FrameAnnotator(_dbc);
+        _hub.Annotator = _annotator.Annotate;
+
+        _server = new TcpApiServer(_hub)
         {
             OnSend = (channel, id, data, ext, fd, brs, source) =>
             {
@@ -42,7 +54,8 @@ public partial class MainWindow : Window
                 if (a?.IsOpen != true) throw new InvalidOperationException("No device connected in CanTerminal.");
                 a.Send(channel, id, data, ext, fd, brs, source);
             },
-            StatusProvider = () => new ApiStatus(_adapter?.IsOpen == true, _adapter?.Name, _adapter?.Channels ?? [], _dbc.FilePath),
+            StatusProvider = () => new ApiStatus(_adapter?.IsOpen == true, _adapter?.Name, _adapter?.Channels ?? [],
+                                                 _dbc.FilePath, _annotator.ProfileName),
         };
         _server.Info += msg => Dispatcher.BeginInvoke(() => InfoText.Text = msg);
 
@@ -148,21 +161,30 @@ public partial class MainWindow : Window
     private void FlushPending()
     {
         bool paused = PauseCheck.IsChecked == true;
-        bool haveDbc = _dbc.IsLoaded;
-        int appended = 0;
+        bool highlight = HighlightCheck.IsChecked == true;
+        double now = _uiClock.Elapsed.TotalSeconds;
+        // Null unless the XCP-only filter is armed *and* a decoder is actually configured —
+        // a half-configured profile must not blank the whole view.
+        var xcpFilter = IsXcpSelected && XcpOnlyCheck.IsChecked == true ? _annotator.Xcp : null;
+        int dequeued = 0, added = 0;
 
-        while (appended < 30_000 && _pending.TryDequeue(out var f))
+        // The dequeue budget counts every frame taken off the queue, filtered or not, so a
+        // burst of uninteresting traffic still drains instead of backing up.
+        while (dequeued < 30_000 && _pending.TryDequeue(out var f))
         {
-            appended++;
-            string? decoded = haveDbc ? SafeDecode(f) : null;
-
-            if (!paused)
-            {
-                _traceRows.Add(TraceRow.From(f, decoded));
-                UpdateFixed(f, decoded);
-            }
+            dequeued++;
+            if (paused) continue;
+            if (xcpFilter is not null && !xcpFilter.Matches(f)) continue;
+            _traceRows.Add(TraceRow.From(f));
+            UpdateFixed(f, now, highlight);
+            added++;
         }
-        if (appended == 0 || paused) return;
+
+        // Decay runs on every tick, not only when frames arrived, so highlights still fade out
+        // on an idle bus. Rows that have finished fading skip out immediately.
+        if (highlight && FixedGrid.IsVisible)
+            foreach (var row in _fixedRows) row.TickFade(now);
+        if (added == 0) return;
 
         if (_traceRows.Count > TraceCap)
         {
@@ -174,22 +196,16 @@ public partial class MainWindow : Window
             TraceList.ScrollIntoView(_traceRows[^1]);
     }
 
-    private string? SafeDecode(CanFrame f)
+    private void UpdateFixed(CanFrame f, double now, bool highlight)
     {
-        try { return _dbc.Decode(f); }
-        catch { return null; }
-    }
-
-    private void UpdateFixed(CanFrame f, string? decoded)
-    {
-        var key = (f.Channel, f.ArbId, f.IsExtended);
+        var key = (f.Channel, f.ArbId, f.IsExtended, f.Annotation?.GroupKey ?? 0);
         if (_fixedMap.TryGetValue(key, out var row))
         {
-            row.Update(f, decoded);
+            row.Update(f, now, highlight);
         }
         else
         {
-            row = new FixedRow(f, decoded);
+            row = new FixedRow(f);
             _fixedMap[key] = row;
             _fixedRows.Add(row);
         }
@@ -254,7 +270,140 @@ public partial class MainWindow : Window
         PeriodicButton.Content = "Start";
     }
 
+    // ---------- protocol profile (XCP) ----------
+
+    private bool IsXcpSelected => ProfileCombo.SelectedIndex == 1;
+
+    private void Profile_Changed(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+    {
+        if (XcpPanel is null) return; // fires during InitializeComponent
+        XcpPanel.Visibility = IsXcpSelected ? Visibility.Visible : Visibility.Collapsed;
+        if (IsXcpSelected) ApplyXcpProfile(announce: false);
+        else
+        {
+            _annotator.Xcp = null;
+            ResetFixedView();
+            XcpStatusText.Text = "";
+        }
+    }
+
+    /// <summary>
+    /// Drops the aggregate rows. Required whenever the grouping basis changes: rows built under
+    /// the previous basis stop updating and would sit there misreporting themselves as live.
+    /// The trace view and the hub's ring buffer are untouched.
+    /// </summary>
+    private void ResetFixedView()
+    {
+        _fixedRows.Clear();
+        _fixedMap.Clear();
+    }
+
+    private void XcpApply_Click(object sender, RoutedEventArgs e) => ApplyXcpProfile(announce: true);
+
+    private void ApplyXcpProfile(bool announce)
+    {
+        try
+        {
+            uint req = ParseHexId(XcpReqBox.Text);
+            uint rsp = ParseHexId(XcpRspBox.Text);
+            if (req == rsp) throw new InvalidOperationException("Request and response IDs must differ.");
+            _annotator.Xcp = new XcpDecoder(new XcpConfig(req, rsp));
+            ResetFixedView();
+            XcpStatusText.Text = $"XCP: req 0x{req:X} / rsp 0x{rsp:X} — Fixed view splits DTOs per ODT";
+            if (announce) InfoText.Text = "XCP profile applied — frames from here on are decoded.";
+        }
+        catch (Exception ex)
+        {
+            _annotator.Xcp = null;
+            ResetFixedView();
+            XcpStatusText.Text = "XCP: not configured";
+            MessageBox.Show(this, ex.Message, "XCP profile", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
+
+    private void XcpDetect_Click(object sender, RoutedEventArgs e)
+    {
+        var frames = _hub.GetRecent(100_000);
+        var candidates = XcpAutoDetect.Scan(frames);
+        if (candidates.Count == 0)
+        {
+            MessageBox.Show(this,
+                $"No XCP-looking exchange found in the last {frames.Count:N0} captured frames.\n\n" +
+                "Detection needs a command/response pair in the capture — most reliably a CONNECT. " +
+                "If the session was already running before capture started, enter the IDs manually " +
+                "or read them from the A2L file.",
+                "XCP detect", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        var best = candidates[0];
+        XcpReqBox.Text = best.RequestId.ToString("X");
+        XcpRspBox.Text = best.ResponseId.ToString("X");
+        ApplyXcpProfile(announce: false);
+
+        var others = candidates.Skip(1).Take(4).Select(c => $"  {c}").ToList();
+        InfoText.Text = $"XCP detected: {best}" + (others.Count > 0 ? $" (+{candidates.Count - 1} other candidate(s))" : "");
+        if (others.Count > 0)
+            MessageBox.Show(this,
+                $"Applied the strongest candidate:\n  {best}\n\nOther candidates:\n{string.Join("\n", others)}",
+                "XCP detect", MessageBoxButton.OK, MessageBoxImage.Information);
+    }
+
+    private void XcpA2l_Click(object sender, RoutedEventArgs e)
+    {
+        var dlg = new OpenFileDialog { Filter = "A2L files (*.a2l)|*.a2l|All files|*.*" };
+        if (dlg.ShowDialog(this) != true) return;
+        try
+        {
+            var result = A2lXcpReader.Read(dlg.FileName);
+            if (!result.HasPair)
+            {
+                MessageBox.Show(this,
+                    "No CAN_ID_MASTER / CAN_ID_SLAVE pair found in an IF_DATA XCP_ON_CAN block.\n\n" +
+                    "The file may describe a different transport layer (Ethernet, USB, FlexRay).",
+                    "Load A2L", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+            XcpReqBox.Text = result.Master!.Value.ToString("X");
+            XcpRspBox.Text = result.Slave!.Value.ToString("X");
+            ApplyXcpProfile(announce: false);
+            InfoText.Text = $"XCP IDs from {Path.GetFileName(dlg.FileName)}: " +
+                            $"master 0x{result.Master:X}, slave 0x{result.Slave:X}" +
+                            (result.Extended ? " (29-bit)" : "");
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, ex.Message, "Load A2L", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
+    private static uint ParseHexId(string text)
+    {
+        string s = text.Trim();
+        if (s.StartsWith("0x", StringComparison.OrdinalIgnoreCase)) s = s[2..];
+        if (!uint.TryParse(s, System.Globalization.NumberStyles.HexNumber, null, out uint id))
+            throw new InvalidOperationException($"'{text}' is not a hex CAN ID.");
+        return id;
+    }
+
     // ---------- view / DBC / server / misc ----------
+
+    private void XcpOnly_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_fixedRows is null) return; // fires during InitializeComponent
+        // The aggregate would otherwise keep rows collected under the previous filter, which
+        // stop updating and read as live traffic.
+        ResetFixedView();
+        InfoText.Text = XcpOnlyCheck.IsChecked == true
+            ? "Showing XCP IDs only — other traffic is still captured, just not displayed."
+            : "Showing all CAN IDs.";
+    }
+
+    private void HighlightCheck_Changed(object sender, RoutedEventArgs e)
+    {
+        // Leaving stale highlights frozen on screen would misreport them as recent changes.
+        foreach (var row in _fixedRows) row.ClearHighlight();
+    }
 
     private void ViewMode_Changed(object sender, RoutedEventArgs e)
     {
@@ -322,11 +471,12 @@ public partial class MainWindow : Window
         if (dlg.ShowDialog(this) != true) return;
         try
         {
-            var sb = new StringBuilder("Time;Chan;Dir;ID;Flags;DLC;Data;Decoded\r\n");
+            var sb = new StringBuilder("Time;Chan;Dir;ID;Flags;DLC;Data;FrameType;Comments\r\n");
             foreach (var r in _traceRows)
                 sb.Append(r.Time).Append(';').Append(r.Chan).Append(';').Append(r.Dir).Append(';')
                   .Append(r.Id).Append(';').Append(r.Flags).Append(';').Append(r.Dlc).Append(';')
-                  .Append(r.Data).Append(';').Append(r.Decoded?.Replace(';', ',')).Append("\r\n");
+                  .Append(r.Data).Append(';').Append(r.Type?.Replace(';', ',')).Append(';')
+                  .Append(r.Decoded?.Replace(';', ',')).Append("\r\n");
             File.WriteAllText(dlg.FileName, sb.ToString(), Encoding.UTF8);
             InfoText.Text = $"Saved {_traceRows.Count:N0} rows to {dlg.FileName}";
         }

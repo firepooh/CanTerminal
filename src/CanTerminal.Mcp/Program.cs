@@ -142,7 +142,7 @@ JsonArray ToolDefinitions()
             },
             "channel", "id"),
         Tool("can_recent",
-            "Get recent frames seen on the bus (from the monitor's ring buffer), newest last. Includes DBC-decoded signals when a DBC is loaded.",
+            "Get recent frames seen on the bus (from the monitor's ring buffer), newest last. Includes DBC-decoded signals when a DBC is loaded, and the decoded frame type/parameters when a protocol profile (e.g. XCP) is active.",
             new JsonObject
             {
                 ["count"] = Prop("integer", "Max frames to return (default 50, max 1000)"),
@@ -222,7 +222,15 @@ string CallTool(string name, JsonObject a)
 
 static string NormalizeHexId(JsonNode? node)
 {
-    var s = node?.GetValue<string>()?.Trim() ?? throw new InvalidOperationException("Missing 'id'.");
+    if (node is null) throw new InvalidOperationException("Missing 'id'.");
+    // The schema says hex string, but clients sometimes send a JSON number anyway;
+    // treat that as a decimal arbitration ID (matching the TCP API's number semantics).
+    if (node is JsonValue v && v.TryGetValue<long>(out var num))
+    {
+        if (num is < 0 or > uint.MaxValue) throw new InvalidOperationException($"Id out of range: {num}.");
+        return ((uint)num).ToString("X");
+    }
+    var s = node.GetValue<string>().Trim();
     if (s.StartsWith("0x", StringComparison.OrdinalIgnoreCase)) s = s[2..];
     _ = uint.Parse(s, System.Globalization.NumberStyles.HexNumber); // validate
     return s;
@@ -236,10 +244,12 @@ static string FormatFrame(JsonObject f)
     if (f["brs"]?.GetValue<bool>() == true) flags.Add("BRS");
     if (f["rtr"]?.GetValue<bool>() == true) flags.Add("RTR");
     if (f["err"]?.GetValue<bool>() == true) flags.Add("ERR");
+    var type = f["type"]?.GetValue<string>();
     var decoded = f["decoded"]?.GetValue<string>();
     return $"  t={f["ts"]} {f["channel"]} {f["dir"]?.GetValue<string>()?.ToUpperInvariant()} " +
            $"0x{f["idHex"]} [{(f["data"]?.GetValue<string>()?.Length ?? 0) / 2}] {f["data"]}" +
            (flags.Count > 0 ? $" ({string.Join(",", flags)})" : "") +
+           (type != null ? $"  {type}" : "") +
            (decoded != null ? $"  |  {decoded}" : "");
 }
 

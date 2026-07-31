@@ -12,7 +12,9 @@ Use this directly when a test doesn't go through python-can:
 Frame dicts look like:
     {"ts": 1.234567, "channel": "CAN1", "id": 291, "idHex": "123",
      "ext": false, "fd": false, "brs": false, "rtr": false, "err": false,
-     "dir": "rx", "data": "001122", "decoded": "EngineData: Rpm=800 rpm" | None}
+     "dir": "rx", "data": "001122",
+     "type": "CTO (CONNECT)" | None,                 # protocol profile (XCP), None when off
+     "decoded": "EngineData: Rpm=800 rpm" | None}    # protocol params and/or DBC signals
 """
 
 from __future__ import annotations

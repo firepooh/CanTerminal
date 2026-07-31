@@ -7,7 +7,8 @@ using System.Threading.Channels;
 
 namespace CanTerminal.Core;
 
-public sealed record ApiStatus(bool Connected, string? Adapter, IReadOnlyList<string> Channels, string? DbcPath);
+public sealed record ApiStatus(bool Connected, string? Adapter, IReadOnlyList<string> Channels, string? DbcPath,
+                               string Profile = "none");
 
 /// <summary>
 /// Loopback TCP remote-control API: newline-delimited JSON, UTF-8.
@@ -26,7 +27,6 @@ public sealed class TcpApiServer : IDisposable
     public delegate void SendHandler(string channel, uint arbId, byte[] data, bool ext, bool fd, bool brs, string source);
 
     private readonly MessageHub _hub;
-    private readonly DbcDecoder? _dbc;
     private TcpListener? _listener;
     private CancellationTokenSource? _cts;
     private readonly List<Client> _clients = [];
@@ -42,11 +42,7 @@ public sealed class TcpApiServer : IDisposable
         public string Name = "?";
     }
 
-    public TcpApiServer(MessageHub hub, DbcDecoder? dbc = null)
-    {
-        _hub = hub;
-        _dbc = dbc;
-    }
+    public TcpApiServer(MessageHub hub) => _hub = hub;
 
     public SendHandler? OnSend { get; set; }
     public Func<ApiStatus>? StatusProvider { get; set; }
@@ -169,7 +165,7 @@ public sealed class TcpApiServer : IDisposable
             case "hello":
             case "status":
             {
-                var st = StatusProvider?.Invoke() ?? new ApiStatus(false, null, [], null);
+                var st = StatusProvider?.Invoke() ?? new ApiStatus(false, null, [], null, "none");
                 return Reply(seq, new JsonObject
                 {
                     ["op"] = op == "hello" ? "hello" : "status",
@@ -179,6 +175,7 @@ public sealed class TcpApiServer : IDisposable
                     ["adapter"] = st.Adapter,
                     ["channels"] = new JsonArray(st.Channels.Select(c => (JsonNode)c).ToArray()),
                     ["dbc"] = st.DbcPath,
+                    ["profile"] = st.Profile,
                     ["totalFrames"] = _hub.TotalFrames,
                     ["clients"] = ClientCount,
                 });
@@ -272,7 +269,8 @@ public sealed class TcpApiServer : IDisposable
         ["err"] = f.IsError,
         ["dir"] = f.Direction == FrameDirection.Tx ? "tx" : "rx",
         ["data"] = f.DataText,
-        ["decoded"] = _dbc?.IsLoaded == true ? _dbc.Decode(f) : null,
+        ["type"] = f.Annotation?.Type,
+        ["decoded"] = f.Annotation?.Comment,
     };
 
     private static uint ParseId(JsonNode node) => ParseIdNode(node);

@@ -26,6 +26,7 @@ public sealed class IcsNeoAdapter : ICanAdapter
     ];
 
     private readonly IcsDeviceInfo _info;
+    private readonly object _txLock = new();
     private IntPtr _handle;
     private Thread? _rxThread;
     private volatile bool _running;
@@ -113,7 +114,16 @@ public sealed class IcsNeoAdapter : ICanAdapter
     public void Close()
     {
         _running = false;
-        _rxThread?.Join(1000);
+        if (_rxThread is { } rx && !rx.Join(3000))
+        {
+            // The RX thread is stuck inside the driver; freeing the handle under it
+            // risks a native crash, so leak the handle instead.
+            ErrorOccurred?.Invoke("RX thread did not stop in time — leaking device handle.");
+            _handle = IntPtr.Zero;
+            _rxThread = null;
+            Channels = [];
+            return;
+        }
         _rxThread = null;
         CloseHandle();
         Channels = [];
@@ -165,8 +175,14 @@ public sealed class IcsNeoAdapter : ICanAdapter
                 msg.ExtraDataPtr = pin.AddrOfPinnedObject();
             }
 
-            if (icsneoTxMessages(_handle, ref msg, netId, 1) == 0)
-                throw new InvalidOperationException($"icsneoTxMessages failed on {channel} (id 0x{arbId:X}).");
+            // Serialize transmits: Send is called from the UI thread and TCP client
+            // tasks concurrently, and icsneo40 is not documented as thread-safe.
+            lock (_txLock)
+            {
+                if (!IsOpen) throw new InvalidOperationException("Device not open.");
+                if (icsneoTxMessages(_handle, ref msg, netId, 1) == 0)
+                    throw new InvalidOperationException($"icsneoTxMessages failed on {channel} (id 0x{arbId:X}).");
+            }
         }
         finally
         {

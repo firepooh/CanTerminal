@@ -13,6 +13,7 @@ and every frame stays visible in the CanTerminal trace window.
 
 from __future__ import annotations
 
+import time
 from typing import Optional, Tuple
 
 import can
@@ -59,8 +60,10 @@ class CanTerminalBus(can.BusABC):
             raise can.CanOperationError(str(exc)) from exc
 
     def _recv_internal(self, timeout: Optional[float]) -> Tuple[Optional[can.Message], bool]:
+        deadline = None if timeout is None else time.monotonic() + timeout
         while True:
-            frame = self._client.get_frame(timeout=timeout)
+            remaining = None if deadline is None else max(0.0, deadline - time.monotonic())
+            frame = self._client.get_frame(timeout=remaining)
             if frame is None:
                 return None, False
             if frame["dir"] == "tx" and not self._receive_own:

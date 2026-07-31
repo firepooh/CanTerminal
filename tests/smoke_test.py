@@ -34,6 +34,23 @@ def check(name: str, cond: bool, detail: str = "") -> None:
         failures.append(name)
 
 
+def poll_recent(ct, arb_id: int, channel: str, timeout: float = 3.0):
+    """Wait for a frame to appear in the ring buffer.
+
+    Used instead of wait_for whenever we are looking for the answer to something we just
+    sent: the virtual bus echoes after ~5 ms, which is easily faster than a second request
+    round-trip can register a wait_for, so wait_for would race and flake under load.
+    """
+    deadline = time.monotonic() + timeout
+    while True:
+        got = ct.recent(count=50, channel=channel, arb_id=arb_id)
+        if got:
+            return got[-1]
+        if time.monotonic() >= deadline:
+            return None
+        time.sleep(0.05)
+
+
 def test_tcp_api() -> None:
     print("TCP JSON API:")
     with CanTerminalClient(port=PORT) as ct:
@@ -46,9 +63,14 @@ def test_tcp_api() -> None:
         frame = ct.get_frame(timeout=2.0)
         check("subscribe stream delivers frames", frame is not None)
 
+        # wait_for against the periodic generator traffic, which is always in flight and so
+        # cannot race with a request we send ourselves
+        gen = ct.wait_for(0x0C0, channel="CAN1", timeout=3.0)
+        check("waitfor delivers generator frame", gen is not None)
+
         # send + transmit report + echo responder
         ct.send("CAN1", 0x123, bytes([1, 2, 3, 4]))
-        reply = ct.wait_for(0x223, channel="CAN1", timeout=2.0)
+        reply = poll_recent(ct, 0x223, "CAN1")
         check("send -> echo responder (0x223)", reply is not None)
         if reply:
             check("echo payload preserved", reply["data"] == "01020304", reply["data"])
@@ -59,7 +81,7 @@ def test_tcp_api() -> None:
 
         # extended id auto-detect
         ct.send("CAN2", 0x18FF50E5, b"\xAA")
-        reply = ct.wait_for(0x18FF51E5, channel="CAN2", timeout=2.0)
+        reply = poll_recent(ct, 0x18FF51E5, "CAN2")
         check("extended id send/echo", reply is not None and reply["ext"] is True)
 
         # error paths
@@ -78,6 +100,64 @@ def test_tcp_api() -> None:
         t0 = time.monotonic()
         none = ct.wait_for(0x7FF, timeout=0.3)
         check("waitfor timeout", none is None and time.monotonic() - t0 < 2.0)
+
+
+XCP_REQ = 0x601   # matches the profile wired into the harness
+XCP_RSP = 0x701   # = XCP_REQ + 0x100, i.e. the virtual bus echo stands in for the slave
+
+
+def test_xcp() -> None:
+    print("XCP profile:")
+    with CanTerminalClient(port=PORT) as ct:
+        check("status reports xcp profile", ct.status().get("profile") == "xcp")
+
+        # Replay of the reference DAQ setup: master commands on the request ID, then two
+        # DAQ-DTOs injected on the response ID once the DAQ lists have been allocated.
+        for can_id, data in [
+            (XCP_REQ, "FF00"),                  # CONNECT
+            (XCP_REQ, "D5000100"),              # ALLOC_DAQ      DAQ_COUNT = 1
+            (XCP_REQ, "D400000004"),            # ALLOC_ODT      4 ODTs on DAQ list 0
+            (XCP_REQ, "E20000000000"),          # SET_DAQ_PTR
+            (XCP_REQ, "E1FF0400C8EACEFE"),      # WRITE_DAQ
+            (XCP_REQ, "E00000000200018B"),      # SET_DAQ_LIST_MODE
+            (XCP_REQ, "DD01"),                  # START_STOP_SYNCH
+            (XCP_RSP, "00674523012301"),        # DAQ-DTO, PID 0 -> DAQ #0 ODT #0
+            (XCP_RSP, "0323012301"),            # DAQ-DTO, PID 3 -> DAQ #0 ODT #3
+        ]:
+            ct.send("CAN1", can_id, bytes.fromhex(data), ext=False)
+            time.sleep(0.02)
+
+        seen = {}
+        for f in ct.recent(count=1000, channel="CAN1"):
+            seen.setdefault((f["idHex"], f["data"]), f)
+
+        def field(can_id: int, data: str, key: str) -> str:
+            return (seen.get((f"{can_id:03X}", data)) or {}).get(key) or ""
+
+        check("CONNECT typed", field(XCP_REQ, "FF00", "type") == "CTO (CONNECT)",
+              field(XCP_REQ, "FF00", "type"))
+        check("ALLOC_DAQ params", field(XCP_REQ, "D5000100", "decoded") == "DAQ_COUNT = 0x0001",
+              field(XCP_REQ, "D5000100", "decoded"))
+        check("ALLOC_ODT params",
+              field(XCP_REQ, "D400000004", "decoded") == "DAQ_LIST_NUMBER = 0x0000|ODT_COUNT = 0x04",
+              field(XCP_REQ, "D400000004", "decoded"))
+        check("WRITE_DAQ little-endian address",
+              "ADDRESS = 0xFECEEAC8" in field(XCP_REQ, "E1FF0400C8EACEFE", "decoded"),
+              field(XCP_REQ, "E1FF0400C8EACEFE", "decoded"))
+        check("SET_DAQ_LIST_MODE params",
+              "EVENT_CHANNEL_NUMBER = 0x0002" in field(XCP_REQ, "E00000000200018B", "decoded"),
+              field(XCP_REQ, "E00000000200018B", "decoded"))
+        check("START_STOP_SYNCH mode",
+              field(XCP_REQ, "DD01", "decoded") == "MODE = 0x01 (start selected)",
+              field(XCP_REQ, "DD01", "decoded"))
+        check("DAQ-DTO PID 0 resolved",
+              field(XCP_RSP, "00674523012301", "type") == "DAQ-DTO (DAQ #0|ODT #0)",
+              field(XCP_RSP, "00674523012301", "type"))
+        check("DAQ-DTO PID 3 resolved",
+              field(XCP_RSP, "0323012301", "type") == "DAQ-DTO (DAQ #0|ODT #3)",
+              field(XCP_RSP, "0323012301", "type"))
+        check("non-XCP frame left unannotated",
+              all(f.get("type") is None for f in ct.recent(count=50, channel="CAN1", arb_id=0x0C0)))
 
 
 class McpProc:
@@ -137,10 +217,15 @@ def test_mcp() -> None:
                                       "arguments": {"channel": "CAN1", "id": "0x321", "data": "CAFE"}})
         check("can_send", sent["result"].get("isError") is False, tool_text(sent))
 
+        # target the periodic generator, not our own echo: each MCP tool call opens its own
+        # TCP connection, so waiting for a ~5 ms echo would race with that setup
         wait = mcp.rpc("tools/call", {"name": "can_wait_for",
-                                      "arguments": {"id": "421", "channel": "CAN1", "timeout_ms": 2000}})
-        check("can_wait_for echo (0x421)", "Received:" in tool_text(wait), tool_text(wait))
-        check("can_wait_for payload", "CAFE" in tool_text(wait), tool_text(wait))
+                                      "arguments": {"id": "0C0", "channel": "CAN1", "timeout_ms": 3000}})
+        check("can_wait_for (generator 0x0C0)", "Received:" in tool_text(wait), tool_text(wait))
+
+        echo = mcp.rpc("tools/call", {"name": "can_recent",
+                                      "arguments": {"count": 50, "channel": "CAN1", "id": "421"}})
+        check("can_send echo visible via can_recent", "CAFE" in tool_text(echo), tool_text(echo))
 
         recent = mcp.rpc("tools/call", {"name": "can_recent", "arguments": {"count": 5}})
         check("can_recent", "frame(s)" in tool_text(recent), tool_text(recent))
@@ -166,6 +251,7 @@ def main() -> int:
         time.sleep(0.3)  # let the traffic generator emit a few frames
 
         test_tcp_api()
+        test_xcp()
         test_mcp()
     finally:
         try:
