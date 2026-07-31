@@ -22,23 +22,44 @@ public sealed record FrameAnnotation(string? Type, string? Comment, int GroupKey
 public sealed class FrameAnnotator
 {
     private readonly DbcDecoder _dbc;
-    private volatile XcpDecoder? _xcp;
+    private volatile XcpDecoder[] _xcp = [];
 
     public FrameAnnotator(DbcDecoder dbc) => _dbc = dbc;
 
-    /// <summary>Active protocol profile decoder, or null for "None".</summary>
-    public XcpDecoder? Xcp
+    /// <summary>
+    /// Active protocol sessions, empty for profile "None". A multi-channel device commonly runs
+    /// an independent XCP session per channel (different CAN ID pairs), so this is a list:
+    /// each decoder carries its own configuration and its own session state.
+    /// </summary>
+    public IReadOnlyList<XcpDecoder> XcpSessions
     {
         get => _xcp;
-        set => _xcp = value;
+        set => _xcp = value is null ? [] : [.. value];
     }
 
-    public string ProfileName => _xcp is null ? "none" : "xcp";
+    public string ProfileName => _xcp.Length == 0 ? "none" : "xcp";
+
+    /// <summary>True when any configured session owns this frame. Used by the display filter.</summary>
+    public bool IsProtocolFrame(CanFrame f)
+    {
+        foreach (var s in _xcp)
+            if (s.Matches(f)) return true;
+        return false;
+    }
 
     public FrameAnnotation? Annotate(CanFrame f)
     {
         FrameAnnotation? protocol = null;
-        try { protocol = _xcp?.Decode(f); }
+        try
+        {
+            // Sessions are disjoint in practice (different channels or ID pairs), so the first
+            // one to claim the frame is the one that owns it.
+            foreach (var s in _xcp)
+            {
+                protocol = s.Decode(f);
+                if (protocol is not null) break;
+            }
+        }
         catch { /* a decoder bug must not stop frame capture */ }
 
         string? dbc = null;

@@ -9,6 +9,7 @@ public sealed class MessageHub
 {
     private readonly object _lock = new();
     private readonly CanFrame[] _ring;
+    private readonly Dictionary<string, long> _byChannel = [];
     private int _head;      // next write index
     private int _count;     // filled slots
     private long _total;
@@ -36,6 +37,7 @@ public sealed class MessageHub
             _ring[_head] = frame;
             _head = (_head + 1) % _ring.Length;
             if (_count < _ring.Length) _count++;
+            _byChannel[frame.Channel] = _byChannel.TryGetValue(frame.Channel, out long n) ? n + 1 : 1;
         }
         Interlocked.Increment(ref _total);
         FrameObserved?.Invoke(frame);
@@ -48,6 +50,16 @@ public sealed class MessageHub
             _head = 0;
             _count = 0;
         }
+    }
+
+    /// <summary>
+    /// Snapshot of frames observed per channel. Like <see cref="TotalFrames"/> these count
+    /// everything seen since start and are not reset by <see cref="Clear"/>, so callers can
+    /// difference them to get a rate.
+    /// </summary>
+    public Dictionary<string, long> ChannelTotals()
+    {
+        lock (_lock) return new Dictionary<string, long>(_byChannel);
     }
 
     /// <summary>Newest-last snapshot of up to <paramref name="count"/> frames matching the filter.</summary>

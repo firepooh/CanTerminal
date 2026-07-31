@@ -13,7 +13,10 @@ int port = args.Length > 0 ? int.Parse(args[0]) : 39999;
 
 var hub = new MessageHub();
 var dbc = new DbcDecoder();
-var annotator = new FrameAnnotator(dbc) { Xcp = new XcpDecoder(new XcpConfig(0x601, 0x701)) };
+var annotator = new FrameAnnotator(dbc)
+{
+    XcpSessions = [new XcpDecoder(new XcpConfig(0x601, 0x701, Channel: "CAN1"))],
+};
 hub.Annotator = annotator.Annotate;
 
 using var adapter = new VirtualAdapter(generateTraffic: true, echoResponder: true);

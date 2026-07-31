@@ -5,6 +5,54 @@ using CanTerminal.Core;
 
 namespace CanTerminal.App;
 
+/// <summary>
+/// Deterministic tint per channel, so a channel reads the same in every view and across runs.
+/// Known channels follow the adapter's channel map; anything else falls back to a stable hash
+/// (string.GetHashCode is randomised per process and would change colours between runs).
+/// </summary>
+internal static class ChannelPalette
+{
+    private static readonly string[] Known = ["CAN1", "CAN2", "CAN3", "CAN4", "MSCAN", "SWCAN"];
+
+    private static readonly Brush[] Tints = Freeze(
+        "#D8E6FA", "#D7F0DC", "#FBE7CC", "#EADDF7", "#FBD9DD", "#D3EEF1");
+
+    public static Brush Tint(string channel)
+    {
+        int i = KnownIndex(channel);
+        return Tints[i >= 0 ? i : StableHash(channel) % Tints.Length];
+    }
+
+    /// <summary>Stable ordinal for sorting, so channels group in the same order every run.</summary>
+    public static int Index(string channel)
+    {
+        int i = KnownIndex(channel);
+        return i >= 0 ? i : Known.Length + (StableHash(channel) % 64);
+    }
+
+    // Runs per frame, so it compares in place rather than allocating an upper-cased copy.
+    private static int KnownIndex(string channel)
+    {
+        for (int i = 0; i < Known.Length; i++)
+            if (string.Equals(Known[i], channel, StringComparison.OrdinalIgnoreCase)) return i;
+        return -1;
+    }
+
+    private static int StableHash(string s)
+    {
+        int h = 0;
+        foreach (char c in s) h = (h * 31) + c;
+        return h & 0x7FFFFFFF;
+    }
+
+    private static Brush[] Freeze(params string[] hex) => hex.Select(h =>
+    {
+        var b = new SolidColorBrush((Color)ColorConverter.ConvertFromString(h)!);
+        b.Freeze();
+        return (Brush)b;
+    }).ToArray();
+}
+
 /// <summary>Immutable, pre-formatted row for the trace view.</summary>
 public sealed class TraceRow
 {
@@ -17,11 +65,13 @@ public sealed class TraceRow
     public required string Data { get; init; }
     public string? Type { get; init; }
     public string? Decoded { get; init; }
+    public required Brush ChanTint { get; init; }
 
     public static TraceRow From(CanFrame f) => new()
     {
         Time = f.Timestamp.ToString("0.000000"),
         Chan = f.Channel,
+        ChanTint = ChannelPalette.Tint(f.Channel),
         Dir = f.Direction == FrameDirection.Tx ? "TX" : "RX",
         Id = f.IdText,
         Flags = FlagsText(f),
@@ -41,8 +91,24 @@ public sealed class TraceRow
         return string.Join(" ", parts);
     }
 
-    public static string FormatData(byte[] data) =>
-        string.Join(" ", data.Select(b => b.ToString("X2")));
+    /// <summary>
+    /// "1A 2B 3C". Formatted by hand into one buffer: this runs for every captured frame, and
+    /// the LINQ + string.Join version allocated a string per byte on top of the result.
+    /// </summary>
+    public static string FormatData(byte[] data)
+    {
+        if (data.Length == 0) return "";
+        const string Hex = "0123456789ABCDEF";
+        Span<char> buffer = stackalloc char[(data.Length * 3) - 1];
+        int at = 0;
+        for (int i = 0; i < data.Length; i++)
+        {
+            if (i > 0) buffer[at++] = ' ';
+            buffer[at++] = Hex[data[i] >> 4];
+            buffer[at++] = Hex[data[i] & 0xF];
+        }
+        return new string(buffer);
+    }
 }
 
 /// <summary>
@@ -152,10 +218,11 @@ public sealed class FixedRow : INotifyPropertyChanged
     public FixedRow(CanFrame f)
     {
         Chan = f.Channel;
+        ChanTint = ChannelPalette.Tint(f.Channel);
         Id = f.IdText;
         // channel (8) | arbitration id (29) | protocol group (11), so the split rows of one
         // CAN ID stay together and sort by PID underneath it.
-        SortKey = ((ulong)(f.Channel.GetHashCode() & 0xFF) << 40)
+        SortKey = ((ulong)(ChannelPalette.Index(f.Channel) & 0xFF) << 40)
                   | ((ulong)f.ArbId << 11)
                   | (uint)(f.Annotation?.GroupKey ?? 0);
         Flags = TraceRow.FlagsText(f);
@@ -169,6 +236,7 @@ public sealed class FixedRow : INotifyPropertyChanged
     }
 
     public string Chan { get; }
+    public Brush ChanTint { get; }
     public string Id { get; }
     public ulong SortKey { get; }
     public string Flags { get; private set; }

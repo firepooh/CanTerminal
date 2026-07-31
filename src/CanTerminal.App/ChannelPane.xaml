@@ -1,0 +1,93 @@
+<UserControl x:Class="CanTerminal.App.ChannelPane"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <UserControl.Resources>
+        <!-- shared by both views so a channel reads identically wherever it appears -->
+        <DataTemplate x:Key="ChannelChip">
+            <Border Background="{Binding ChanTint}" CornerRadius="2" Padding="4,0"
+                    HorizontalAlignment="Left" VerticalAlignment="Center">
+                <TextBlock Text="{Binding Chan}"/>
+            </Border>
+        </DataTemplate>
+        <DataTemplate x:Key="DataBytes">
+            <ItemsControl ItemsSource="{Binding Bytes}">
+                <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate>
+                        <StackPanel Orientation="Horizontal"/>
+                    </ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <Border Background="{Binding Background}" Margin="0,0,4,0" CornerRadius="2">
+                            <TextBlock Text="{Binding Text}" Foreground="{Binding Foreground}"/>
+                        </Border>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </DataTemplate>
+    </UserControl.Resources>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <!-- pane header: what this pane shows -->
+        <Border Grid.Row="0" Background="#F0F0F0" BorderBrush="#DDD" BorderThickness="0,0,0,1" Padding="5,3">
+            <StackPanel Orientation="Horizontal">
+                <TextBlock Text="Channel:" VerticalAlignment="Center" Margin="0,0,4,0"/>
+                <ComboBox x:Name="ChannelCombo" Width="90" SelectionChanged="Pane_Changed"
+                          ToolTip="Which channel this pane shows. 'All' keeps the true cross-channel time order."/>
+                <ComboBox x:Name="ViewCombo" Width="80" Margin="6,0,0,0" SelectedIndex="0"
+                          SelectionChanged="Pane_Changed">
+                    <ComboBoxItem Content="Trace"/>
+                    <ComboBoxItem Content="Fixed"/>
+                </ComboBox>
+                <Button x:Name="LiveButton" Content="▼ Live" Visibility="Collapsed" Click="Live_Click"
+                        Margin="8,0,0,0" Background="#FFF3CD"
+                        ToolTip="You are reading back through history and the view is held still. Click to jump to the newest rows and resume live updates."/>
+                <TextBlock x:Name="PaneStats" VerticalAlignment="Center" Margin="10,0,0,0" Foreground="Gray"/>
+            </StackPanel>
+        </Border>
+
+        <!-- trace view -->
+        <ListView x:Name="TraceList" Grid.Row="1" FontFamily="Consolas" FontSize="12"
+                  VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"
+                  ScrollViewer.ScrollChanged="Trace_ScrollChanged">
+            <ListView.View>
+                <GridView>
+                    <GridViewColumn Header="Time [s]" Width="95" DisplayMemberBinding="{Binding Time}"/>
+                    <GridViewColumn Header="Chan" Width="55" CellTemplate="{StaticResource ChannelChip}"/>
+                    <GridViewColumn Header="Dir" Width="38" DisplayMemberBinding="{Binding Dir}"/>
+                    <GridViewColumn Header="ID" Width="80" DisplayMemberBinding="{Binding Id}"/>
+                    <GridViewColumn Header="Flags" Width="70" DisplayMemberBinding="{Binding Flags}"/>
+                    <GridViewColumn Header="DLC" Width="38" DisplayMemberBinding="{Binding Dlc}"/>
+                    <GridViewColumn Header="Data" Width="300" DisplayMemberBinding="{Binding Data}"/>
+                    <GridViewColumn Header="Frame type" Width="185" DisplayMemberBinding="{Binding Type}"/>
+                    <GridViewColumn Header="Comments" Width="460" DisplayMemberBinding="{Binding Decoded}"/>
+                </GridView>
+            </ListView.View>
+        </ListView>
+
+        <!-- fixed (aggregate) view -->
+        <DataGrid x:Name="FixedGrid" Grid.Row="1" Visibility="Collapsed" AutoGenerateColumns="False"
+                  IsReadOnly="True" FontFamily="Consolas" FontSize="12"
+                  EnableRowVirtualization="True" HeadersVisibility="Column">
+            <DataGrid.Columns>
+                <DataGridTemplateColumn Header="Chan" Width="60" SortMemberPath="Chan"
+                                        CellTemplate="{StaticResource ChannelChip}"/>
+                <DataGridTextColumn Header="ID" Binding="{Binding Id}" Width="90" SortMemberPath="SortKey" SortDirection="Ascending"/>
+                <DataGridTextColumn Header="Flags" Binding="{Binding Flags}" Width="70"/>
+                <DataGridTextColumn Header="Count" Binding="{Binding Count}" Width="80"/>
+                <DataGridTextColumn Header="Period [ms]" Binding="{Binding PeriodMs}" Width="90"/>
+                <DataGridTextColumn Header="DLC" Binding="{Binding Dlc}" Width="45"/>
+                <!-- per-byte cells so a byte that just changed can carry its own fading highlight -->
+                <DataGridTemplateColumn Header="Data" Width="300" SortMemberPath="DataText"
+                                        CellTemplate="{StaticResource DataBytes}"/>
+                <DataGridTextColumn Header="Frame type" Binding="{Binding Type}" Width="185"/>
+                <DataGridTextColumn Header="Comments" Binding="{Binding Decoded}" Width="*"/>
+            </DataGrid.Columns>
+        </DataGrid>
+    </Grid>
+</UserControl>

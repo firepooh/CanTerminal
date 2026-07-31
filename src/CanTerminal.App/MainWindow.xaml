@@ -1,8 +1,34 @@
 <Window x:Class="CanTerminal.App.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="CanTerminal — ValueCAN Monitor" Height="720" Width="1180"
+        xmlns:local="clr-namespace:CanTerminal.App"
+        Title="CanTerminal — ValueCAN Monitor" Height="760" Width="1280"
         Closing="Window_Closing">
+    <Window.Resources>
+        <!-- Toolbar breathing room. Safe as implicit styles: nothing in the panes is harmed by
+             a margin, and the data templates use TextBlock and Border rather than these. -->
+        <Style TargetType="CheckBox">
+            <Setter Property="Margin" Value="8,0,0,0"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+        </Style>
+        <Style TargetType="Button">
+            <Setter Property="Margin" Value="5,0,0,0"/>
+            <Setter Property="Padding" Value="7,1"/>
+        </Style>
+        <Style TargetType="TextBox">
+            <Setter Property="Margin" Value="2,0,0,0"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+        </Style>
+        <Style TargetType="ComboBox">
+            <Setter Property="Margin" Value="2,0,0,0"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+        </Style>
+        <Style TargetType="Label">
+            <Setter Property="Margin" Value="6,0,0,0"/>
+            <Setter Property="Padding" Value="0,3"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+        </Style>
+    </Window.Resources>
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
@@ -19,7 +45,8 @@
                 <ComboBox x:Name="DeviceCombo" Width="230"/>
                 <Button x:Name="RefreshButton" Content="Refresh" Click="RefreshButton_Click"/>
                 <Label Content="Channels:"/>
-                <TextBox x:Name="ChannelsBox" Width="90" Text="CAN1" ToolTip="Comma separated: CAN1,CAN2,CAN3,CAN4,MSCAN,SWCAN"/>
+                <TextBox x:Name="ChannelsBox" Width="140" Text="CAN1"
+                         ToolTip="Comma separated: CAN1,CAN2,CAN3,CAN4,MSCAN,SWCAN&#10;Per-channel speed: NAME@bitrate[:fdbitrate], e.g. CAN1@500000,CAN2@125000&#10;Without @ the toolbar bitrate is used."/>
                 <Label Content="Bitrate:"/>
                 <ComboBox x:Name="BitrateCombo" Width="80" SelectedIndex="2">
                     <ComboBoxItem Content="125000"/>
@@ -60,8 +87,16 @@
                 <TextBox x:Name="TxCycleBox" Width="50" Text="100"/>
                 <Button x:Name="PeriodicButton" Content="Start" Click="PeriodicButton_Click"/>
                 <Separator Width="18" Visibility="Hidden"/>
-                <RadioButton x:Name="TraceRadio" Content="Trace" IsChecked="True" VerticalAlignment="Center" Checked="ViewMode_Changed"/>
-                <RadioButton x:Name="FixedRadio" Content="Fixed" Margin="8,0,0,0" VerticalAlignment="Center" Checked="ViewMode_Changed"/>
+                <Label Content="Layout:"/>
+                <ComboBox x:Name="LayoutCombo" Width="115" SelectedIndex="0" SelectionChanged="Layout_Changed"
+                          ToolTip="Single keeps one merged view, which preserves the true cross-channel time order.&#10;Split shows two panes, each with its own channel and view mode.">
+                    <ComboBoxItem Content="Single"/>
+                    <ComboBoxItem Content="Split ↔"/>
+                    <ComboBoxItem Content="Split ↕"/>
+                </ComboBox>
+                <Label Content="History:"/>
+                <TextBox x:Name="HistoryBox" Width="60" Text="50000" LostFocus="History_Changed"
+                         ToolTip="Trace rows kept per pane (min 100). Once full the oldest row is overwritten in place."/>
                 <CheckBox x:Name="AutoScrollCheck" Content="Autoscroll" IsChecked="True"/>
                 <CheckBox x:Name="HighlightCheck" Content="Highlight changes" IsChecked="True"
                           Unchecked="HighlightCheck_Changed"
@@ -82,79 +117,38 @@
                     <ComboBoxItem Content="XCP"/>
                 </ComboBox>
                 <StackPanel x:Name="XcpPanel" Orientation="Horizontal" Visibility="Collapsed">
-                    <Label Content="Req ID(hex):"/>
-                    <TextBox x:Name="XcpReqBox" Width="70" Text="701" FontFamily="Consolas"
+                    <Label Content="Channel:"/>
+                    <ComboBox x:Name="XcpChannelCombo" Width="80" SelectionChanged="XcpChannel_Changed"
+                              ToolTip="One XCP session per channel: a 2-port master uses a different CAN ID pair on each."/>
+                    <Label Content="Req(hex):"/>
+                    <TextBox x:Name="XcpReqBox" Width="75" Text="701" FontFamily="Consolas"
                              ToolTip="CAN ID the master sends commands on (CMD)"/>
-                    <Label Content="Rsp ID(hex):"/>
-                    <TextBox x:Name="XcpRspBox" Width="70" Text="702" FontFamily="Consolas"
+                    <Label Content="Rsp(hex):"/>
+                    <TextBox x:Name="XcpRspBox" Width="75" Text="702" FontFamily="Consolas"
                              ToolTip="CAN ID the slave answers and sends DAQ-DTOs on (RES/DAQ)"/>
-                    <Button x:Name="XcpApplyButton" Content="Apply" Click="XcpApply_Click"/>
-                    <Button x:Name="XcpDetectButton" Content="Detect" Click="XcpDetect_Click"
-                            ToolTip="Scan captured traffic for a CONNECT or GET_SLAVE_ID exchange. Sends nothing on the bus."/>
+                    <Button x:Name="XcpApplyButton" Content="Set" Click="XcpApply_Click"
+                            ToolTip="Configure the session for the selected channel."/>
+                    <Button x:Name="XcpRemoveButton" Content="Remove" Click="XcpRemove_Click"
+                            ToolTip="Drop the session on the selected channel."/>
+                    <Button x:Name="XcpDetectButton" Content="Detect all" Click="XcpDetect_Click"
+                            ToolTip="Scan captured traffic for CONNECT or GET_SLAVE_ID exchanges and configure every channel found. Sends nothing on the bus."/>
                     <Button x:Name="XcpA2lButton" Content="From A2L…" Click="XcpA2l_Click"
-                            ToolTip="Read CAN_ID_MASTER / CAN_ID_SLAVE from an A2L file's IF_DATA XCP_ON_CAN block."/>
+                            ToolTip="Read CAN_ID_MASTER / CAN_ID_SLAVE from IF_DATA XCP_ON_CAN. Select several files (p1, p2, …) to configure several channels at once."/>
                     <CheckBox x:Name="XcpOnlyCheck" Content="XCP IDs only" VerticalAlignment="Center" Margin="10,0,0,0"
                               Checked="XcpOnly_Changed" Unchecked="XcpOnly_Changed"
-                              ToolTip="Hide everything except the XCP request/response IDs. Applies to frames captured from now on; the Fixed view is reset."/>
+                              ToolTip="Hide everything except the configured XCP IDs. Applies to frames captured from now on; the Fixed view is reset."/>
                 </StackPanel>
                 <TextBlock x:Name="XcpStatusText" VerticalAlignment="Center" Margin="8,0" Foreground="Gray"/>
             </WrapPanel>
         </Border>
 
-        <!-- trace view -->
-        <ListView x:Name="TraceList" Grid.Row="3" FontFamily="Consolas" FontSize="12"
-                  VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling">
-            <ListView.View>
-                <GridView>
-                    <GridViewColumn Header="Time [s]" Width="95" DisplayMemberBinding="{Binding Time}"/>
-                    <GridViewColumn Header="Chan" Width="55" DisplayMemberBinding="{Binding Chan}"/>
-                    <GridViewColumn Header="Dir" Width="38" DisplayMemberBinding="{Binding Dir}"/>
-                    <GridViewColumn Header="ID" Width="80" DisplayMemberBinding="{Binding Id}"/>
-                    <GridViewColumn Header="Flags" Width="70" DisplayMemberBinding="{Binding Flags}"/>
-                    <GridViewColumn Header="DLC" Width="38" DisplayMemberBinding="{Binding Dlc}"/>
-                    <GridViewColumn Header="Data" Width="300" DisplayMemberBinding="{Binding Data}"/>
-                    <GridViewColumn Header="Frame type" Width="185" DisplayMemberBinding="{Binding Type}"/>
-                    <GridViewColumn Header="Comments" Width="460" DisplayMemberBinding="{Binding Decoded}"/>
-                </GridView>
-            </ListView.View>
-        </ListView>
-
-        <!-- fixed (aggregate) view -->
-        <DataGrid x:Name="FixedGrid" Grid.Row="3" Visibility="Collapsed" AutoGenerateColumns="False"
-                  IsReadOnly="True" FontFamily="Consolas" FontSize="12"
-                  EnableRowVirtualization="True" HeadersVisibility="Column">
-            <DataGrid.Columns>
-                <DataGridTextColumn Header="Chan" Binding="{Binding Chan}" Width="60"/>
-                <DataGridTextColumn Header="ID" Binding="{Binding Id}" Width="90" SortMemberPath="SortKey" SortDirection="Ascending"/>
-                <DataGridTextColumn Header="Flags" Binding="{Binding Flags}" Width="70"/>
-                <DataGridTextColumn Header="Count" Binding="{Binding Count}" Width="80"/>
-                <DataGridTextColumn Header="Period [ms]" Binding="{Binding PeriodMs}" Width="90"/>
-                <DataGridTextColumn Header="DLC" Binding="{Binding Dlc}" Width="45"/>
-                <!-- per-byte cells so a byte that just changed can carry its own fading highlight -->
-                <DataGridTemplateColumn Header="Data" Width="300" SortMemberPath="DataText">
-                    <DataGridTemplateColumn.CellTemplate>
-                        <DataTemplate>
-                            <ItemsControl ItemsSource="{Binding Bytes}">
-                                <ItemsControl.ItemsPanel>
-                                    <ItemsPanelTemplate>
-                                        <StackPanel Orientation="Horizontal"/>
-                                    </ItemsPanelTemplate>
-                                </ItemsControl.ItemsPanel>
-                                <ItemsControl.ItemTemplate>
-                                    <DataTemplate>
-                                        <Border Background="{Binding Background}" Margin="0,0,4,0" CornerRadius="2">
-                                            <TextBlock Text="{Binding Text}" Foreground="{Binding Foreground}"/>
-                                        </Border>
-                                    </DataTemplate>
-                                </ItemsControl.ItemTemplate>
-                            </ItemsControl>
-                        </DataTemplate>
-                    </DataGridTemplateColumn.CellTemplate>
-                </DataGridTemplateColumn>
-                <DataGridTextColumn Header="Frame type" Binding="{Binding Type}" Width="185"/>
-                <DataGridTextColumn Header="Comments" Binding="{Binding Decoded}" Width="*"/>
-            </DataGrid.Columns>
-        </DataGrid>
+        <!-- one or two panes; row/column definitions are set by ApplyLayout -->
+        <Grid x:Name="PaneHost" Grid.Row="3">
+            <local:ChannelPane x:Name="PaneA"/>
+            <GridSplitter x:Name="PaneSplitter" Background="#CCC" Visibility="Collapsed"
+                          HorizontalAlignment="Stretch" VerticalAlignment="Stretch"/>
+            <local:ChannelPane x:Name="PaneB" Visibility="Collapsed"/>
+        </Grid>
 
         <!-- status bar -->
         <StatusBar Grid.Row="4">
