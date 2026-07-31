@@ -297,10 +297,21 @@ public partial class MainWindow : Window
         var perChannel = _hub.ChannelTotals();
 
         // Per-channel rate: on a 2-port setup "CAN2 went quiet" is the thing you need to see,
-        // and a single combined number hides exactly that.
-        var parts = perChannel
-            .OrderBy(kv => ChannelPalette.Index(kv.Key))
-            .Select(kv => $"{kv.Key}: {kv.Value - (_lastChannelTotals.TryGetValue(kv.Key, out long p) ? p : 0)} fps")
+        // and a single combined number hides exactly that. Every open channel is listed even
+        // when it has never carried a frame — a channel that silently vanishes from the list
+        // is precisely the failure this is meant to surface.
+        var channels = _adapter?.Channels.ToList() ?? [.. perChannel.Keys];
+        foreach (var extra in perChannel.Keys.Where(c => !channels.Contains(c, StringComparer.OrdinalIgnoreCase)))
+            channels.Add(extra);
+
+        var parts = channels
+            .OrderBy(ChannelPalette.Index)
+            .Select(c =>
+            {
+                long now = perChannel.TryGetValue(c, out long n) ? n : 0;
+                long was = _lastChannelTotals.TryGetValue(c, out long p) ? p : 0;
+                return $"{c}: {now - was} fps";
+            })
             .ToList();
         RateText.Text = parts.Count > 0 ? string.Join("   ", parts) : $"{total - _lastTotal} fps";
         _lastChannelTotals = perChannel;

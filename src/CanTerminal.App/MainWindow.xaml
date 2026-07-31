@@ -45,7 +45,7 @@
                 <ComboBox x:Name="DeviceCombo" Width="230"/>
                 <Button x:Name="RefreshButton" Content="Refresh" Click="RefreshButton_Click"/>
                 <Label Content="Channels:"/>
-                <TextBox x:Name="ChannelsBox" Width="140" Text="CAN1"
+                <TextBox x:Name="ChannelsBox" Width="140" Text="CAN1,CAN2"
                          ToolTip="Comma separated: CAN1,CAN2,CAN3,CAN4,MSCAN,SWCAN&#10;Per-channel speed: NAME@bitrate[:fdbitrate], e.g. CAN1@500000,CAN2@125000&#10;Without @ the toolbar bitrate is used."/>
                 <Label Content="Bitrate:"/>
                 <ComboBox x:Name="BitrateCombo" Width="80" SelectedIndex="2">
