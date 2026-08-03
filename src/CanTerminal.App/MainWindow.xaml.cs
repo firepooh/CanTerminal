@@ -62,6 +62,14 @@ public partial class MainWindow : Window
     private string? _txChannel;
     private string? _xcpChannel;        // channel the XCP dialog opens on
 
+    // The device's hardware timestamp is the only clock on a frame, so absolute and relative
+    // readings hang off the first frame of the capture: its timestamp, and the wall clock at
+    // the moment it was taken off the queue.
+    private TimestampMode _timestampMode = TimestampMode.Relative;
+    private double _zeroTs;
+    private DateTime _zeroWall = DateTime.Now;
+    private bool _haveZero;
+
     private readonly DispatcherTimer _flushTimer;
     private readonly DispatcherTimer _statusTimer;
     private readonly DispatcherTimer _periodicTimer;
@@ -97,8 +105,10 @@ public partial class MainWindow : Window
 
         _hub.FrameObserved += f => _pending.Enqueue(f);
 
-        PaneA.SelectionChanged += UpdateStatusBar;
-        PaneB.SelectionChanged += UpdateStatusBar;
+        PaneA.SelectionChanged += OnPaneSelectionChanged;
+        PaneB.SelectionChanged += OnPaneSelectionChanged;
+        PaneA.ZoomRequested += ZoomText;
+        PaneB.ZoomRequested += ZoomText;
 
         // 20 Hz, chosen with its cost known. Every tick that publishes rows repaints the whole
         // trace list, and on a maximised 4K window that is the app's dominant cost — GPU and
@@ -427,6 +437,15 @@ public partial class MainWindow : Window
 
         while (_pending.TryDequeue(out var f))
         {
+            if (!_haveZero)
+            {
+                // First frame of the capture: this is what absolute and relative are measured
+                // from. Taken here rather than at connect so an idle bus does not skew it.
+                _haveZero = true;
+                _zeroTs = f.Timestamp;
+                _zeroWall = DateTime.Now;
+                ApplyTimeBase();
+            }
             if (!paused && (xcpFilter is null || xcpFilter.IsProtocolFrame(f)))
             {
                 foreach (var pane in panes)
@@ -581,6 +600,113 @@ public partial class MainWindow : Window
     private void LayoutSplitH_Executed(object sender, ExecutedRoutedEventArgs e) => SetLayout(1);
     private void LayoutSplitV_Executed(object sender, ExecutedRoutedEventArgs e) => SetLayout(2);
 
+    private void CanSplitForXcp(object sender, CanExecuteRoutedEventArgs e) => e.CanExecute = IsXcpSelected;
+    private void LayoutXcpSplit_Executed(object sender, ExecutedRoutedEventArgs e) => ApplyXcpSplit();
+
+    /// <summary>
+    /// The two halves of an XCP session want opposite views, so give them one pane each: the
+    /// command exchange scrolling on top, where the order of CONNECT / ALLOC / WRITE_DAQ is the
+    /// whole point, and the DAQ stream aggregated underneath, where the order is noise and what
+    /// matters is one row per ODT with its period and its changing bytes.
+    /// </summary>
+    private void ApplyXcpSplit()
+    {
+        SetLayout(2);                                   // stacked: commands above, data below
+        // Both panes span every channel. They are two views of the same thing, so pinning one
+        // to CAN1 and leaving the other on CAN2 — which is what the split defaults would do on
+        // a 2-port master — would pair a command exchange with somebody else's DAQ stream.
+        PaneA.SelectChannel(ChannelPane.AllChannels);
+        PaneB.SelectChannel(ChannelPane.AllChannels);
+        PaneA.SetTraceView(true);
+        PaneA.SetContentMode(ChannelPane.PaneContent.XcpCommands);
+        PaneB.SetTraceView(false);
+        PaneB.SetContentMode(ChannelPane.PaneContent.XcpData);
+        ApplyContentFilters();
+        InfoText.Text = "XCP split: commands above (trace), DAQ data below (aggregated per ODT).";
+    }
+
+    /// <summary>
+    /// Hands each pane the test behind its content selection. The decoder has already separated
+    /// the two: it reserves aggregate group 0 for command traffic and gives every DAQ/STIM
+    /// object its PID + 1, so nothing has to be classified a second time here.
+    /// </summary>
+    private void ApplyContentFilters()
+    {
+        foreach (var pane in new[] { PaneA, PaneB })
+            pane.SetContentFilter(pane.ContentMode switch
+            {
+                // Group 0 also covers every frame no session claimed, hence the second test.
+                ChannelPane.PaneContent.XcpCommands =>
+                    f => (f.Annotation?.GroupKey ?? 0) == 0 && _annotator.IsProtocolFrame(f),
+                // A non-zero group can only have come from the XCP decoder.
+                ChannelPane.PaneContent.XcpData => f => (f.Annotation?.GroupKey ?? 0) > 0,
+                _ => null,
+            });
+    }
+
+    private void OnPaneSelectionChanged()
+    {
+        ApplyContentFilters();
+        UpdateStatusBar();
+    }
+
+    // ---------- text size ----------
+
+    private const double DefaultFontSize = 12;
+    private double _fontSize = DefaultFontSize;
+
+    private void FontLarger_Executed(object sender, ExecutedRoutedEventArgs e) => ZoomText(+1);
+    private void FontSmaller_Executed(object sender, ExecutedRoutedEventArgs e) => ZoomText(-1);
+    private void FontReset_Executed(object sender, ExecutedRoutedEventArgs e) => SetFontSize(DefaultFontSize);
+
+    private void ZoomText(int steps) => SetFontSize(_fontSize + steps);
+
+    /// <summary>
+    /// Both panes share one text size — they are two views of the same capture, and a trace at
+    /// 9 pt above one at 18 pt is nobody's intent. Column widths scale with it, otherwise the
+    /// first step up clips every column.
+    /// </summary>
+    private void SetFontSize(double size)
+    {
+        double clamped = Math.Clamp(size, 8, 28);
+        if (Math.Abs(clamped - _fontSize) < 0.01) return;
+        _fontSize = clamped;
+        PaneA.SetFontSize(_fontSize);
+        PaneB.SetFontSize(_fontSize);
+        InfoText.Text = $"Text size {_fontSize:0} pt (Ctrl+wheel, Ctrl+/Ctrl-, Ctrl+0 to reset).";
+    }
+
+    // ---------- timestamps ----------
+
+    private void Timestamps_Click(object sender, RoutedEventArgs e)
+    {
+        SetTimestampMode(
+            ReferenceEquals(sender, MenuTsAbsolute) ? TimestampMode.Absolute :
+            ReferenceEquals(sender, MenuTsDelta) ? TimestampMode.Delta :
+            TimestampMode.Relative);
+    }
+
+    private void SetTimestampMode(TimestampMode mode)
+    {
+        _timestampMode = mode;
+        MenuTsAbsolute.IsChecked = mode == TimestampMode.Absolute;
+        MenuTsRelative.IsChecked = mode == TimestampMode.Relative;
+        MenuTsDelta.IsChecked = mode == TimestampMode.Delta;
+        ApplyTimeBase();
+    }
+
+    /// <summary>
+    /// Hands both panes the current mode and capture anchor. Rows already on screen are re-read
+    /// rather than discarded — switching to delta is most useful on a capture you have already
+    /// paused and are picking through.
+    /// </summary>
+    private void ApplyTimeBase()
+    {
+        var time = new TimeBase(_timestampMode, _zeroTs, _zeroWall);
+        PaneA.SetTimeBase(time);
+        PaneB.SetTimeBase(time);
+    }
+
     private void SetLayout(int layout)
     {
         _layout = layout;
@@ -652,6 +778,23 @@ public partial class MainWindow : Window
         RebuildXcpSessions();
         UpdateMenuState();
         UpdateSummary();
+        PaneA.ShowSenderColumn(xcp);
+        PaneB.ShowSenderColumn(xcp);
+
+        if (xcp)
+        {
+            // Selecting the profile is the moment the split becomes the useful layout, so go
+            // there rather than making it a second thing to find. View ▸ Layout still wins
+            // afterwards.
+            ApplyXcpSplit();
+        }
+        else
+        {
+            // The XCP filters would leave both panes permanently blank without a session.
+            PaneA.SetContentMode(ChannelPane.PaneContent.All);
+            PaneB.SetContentMode(ChannelPane.PaneContent.All);
+            ApplyContentFilters();
+        }
     }
 
     /// <summary>
@@ -848,18 +991,22 @@ public partial class MainWindow : Window
         foreach (var pane in ActivePanes) pane.ClearHighlights();
     }
 
+    /// <summary>
+    /// Clears immediately, with no confirmation. The design handoff asked for a prompt on a
+    /// destructive action, but this one is pressed reflexively while watching traffic — a modal
+    /// in that path costs more than the mistake does, and the buffer refills the moment it is
+    /// gone. The status line says what went.
+    /// </summary>
     private void ClearAll_Executed(object sender, ExecutedRoutedEventArgs e)
     {
-        if (MessageBox.Show(this,
-                "Clear both panes and the capture buffer?\n\nEverything captured so far is discarded — " +
-                "recent() and the TCP API will no longer see it.",
-                "Clear all", MessageBoxButton.OKCancel, MessageBoxImage.Warning) != MessageBoxResult.OK)
-            return;
-
+        long discarded = _hub.TotalFrames;
         PaneA.ClearAll();
         PaneB.ClearAll();
         _hub.Clear();
         _displaySkipped = 0;
+        _haveZero = false;              // the next frame starts a new capture to measure from
+        InfoText.Text = $"Cleared — {discarded:N0} captured frames discarded (recent() and the TCP API no longer see them).";
+        UpdateStatusBar();
     }
 
     // ---------- file / DBC ----------
@@ -908,13 +1055,19 @@ public partial class MainWindow : Window
             // filters "what the screen shows" is ambiguous, and the full capture is what you
             // actually want in a file.
             var frames = _hub.GetRecent(int.MaxValue);
-            var sb = new StringBuilder("Time;Chan;Dir;ID;Flags;DLC;Data;FrameType;Comments\r\n");
+            // The Time column follows the mode on screen; delta runs over the exported sequence,
+            // which is the whole capture rather than one pane's slice of it.
+            var time = new TimeBase(_timestampMode, _zeroTs, _zeroWall);
+            double previousTs = double.NaN;
+            var sb = new StringBuilder($"{time.ColumnHeader};Chan;Dir;ID;Flags;DLC;Data;Sender;FrameType;Comments\r\n");
             foreach (var f in frames)
             {
-                var r = TraceRow.From(f);
+                var r = TraceRow.From(f, time, previousTs);
+                previousTs = f.Timestamp;
                 sb.Append(r.Time).Append(';').Append(r.Chan).Append(';').Append(r.Dir).Append(';')
                   .Append(r.Id).Append(';').Append(r.Flags).Append(';').Append(r.Dlc).Append(';')
-                  .Append(r.Data).Append(';').Append(r.Type?.Replace(';', ',')).Append(';')
+                  .Append(r.Data).Append(';').Append(r.Sender).Append(';')
+                  .Append(r.Type?.Replace(';', ',')).Append(';')
                   .Append(r.Decoded?.Replace(';', ',')).Append("\r\n");
             }
             File.WriteAllText(dlg.FileName, sb.ToString(), Encoding.UTF8);
@@ -1045,7 +1198,10 @@ public partial class MainWindow : Window
 
             View
               Ctrl+1 / 2 / 3  Single / Split ↔ / Split ↕
-              End             Jump to live
+              Ctrl+4          XCP command / data split
+              Ctrl++ / Ctrl+- Text larger / smaller  (also Ctrl + mouse wheel)
+              Ctrl+0          Reset text size
+              End             Jump to newest
               F7              Pause display
               Ctrl+L          Clear all
 

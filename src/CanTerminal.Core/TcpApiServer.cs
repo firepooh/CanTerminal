@@ -271,6 +271,7 @@ public sealed class TcpApiServer : IDisposable
         ["data"] = f.DataText,
         ["type"] = f.Annotation?.Type,
         ["decoded"] = f.Annotation?.Comment,
+        ["sender"] = f.Annotation?.Sender,
     };
 
     private static uint ParseId(JsonNode node) => ParseIdNode(node);

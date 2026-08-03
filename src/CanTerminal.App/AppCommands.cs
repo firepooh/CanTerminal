@@ -31,6 +31,23 @@ public static class AppCommands
         Make("Split horizontally", nameof(LayoutSplitH), new KeyGesture(Key.D2, ModifierKeys.Control, "Ctrl+2"));
     public static readonly RoutedUICommand LayoutSplitV =
         Make("Split vertically", nameof(LayoutSplitV), new KeyGesture(Key.D3, ModifierKeys.Control, "Ctrl+3"));
+    public static readonly RoutedUICommand LayoutXcpSplit =
+        Make("XCP command / data split", nameof(LayoutXcpSplit),
+             new KeyGesture(Key.D4, ModifierKeys.Control, "Ctrl+4"));
+
+    // Both the main row and the numeric keypad, because either is what a hand reaches for.
+    public static readonly RoutedUICommand FontLarger =
+        Make("Larger text", nameof(FontLarger),
+             new KeyGesture(Key.OemPlus, ModifierKeys.Control, "Ctrl++"),
+             new KeyGesture(Key.Add, ModifierKeys.Control));
+    public static readonly RoutedUICommand FontSmaller =
+        Make("Smaller text", nameof(FontSmaller),
+             new KeyGesture(Key.OemMinus, ModifierKeys.Control, "Ctrl+-"),
+             new KeyGesture(Key.Subtract, ModifierKeys.Control));
+    public static readonly RoutedUICommand FontReset =
+        Make("Reset text size", nameof(FontReset),
+             new KeyGesture(Key.D0, ModifierKeys.Control, "Ctrl+0"),
+             new KeyGesture(Key.NumPad0, ModifierKeys.Control));
 
     public static readonly RoutedUICommand JumpToLive =
         Make("Jump to live", nameof(JumpToLive), new KeyGesture(Key.End));

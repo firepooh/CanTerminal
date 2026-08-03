@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Windows;
 using System.Windows.Media;
 using CanTerminal.Core;
 
@@ -53,6 +54,79 @@ internal static class ChannelPalette
     }).ToArray();
 }
 
+/// <summary>
+/// Colours for the two sides of a request/response protocol.
+///
+/// The Sender cell is tinted, and slave rows get a background wash so a command and its answer
+/// read as a pair down a long initialisation sequence. That wash is deliberately grey: the
+/// channel chips already own pastel blue and orange, and a second hue on the same row leaves
+/// you unable to say whether a colour means channel or sender.
+///
+/// The text colours are darker than the blue and orange these protocols are usually drawn in.
+/// Those are poster colours — at 12 pt on white the familiar orange lands near 2:1 contrast and
+/// simply cannot be read. These clear 5:1, and blue/orange stays distinguishable to the common
+/// forms of colour blindness in a way red/green would not.
+/// </summary>
+internal static class SenderPalette
+{
+    private static readonly Brush MasterText = Frozen("#1F6FB2");   // 5.3:1 on white
+    private static readonly Brush SlaveText = Frozen("#A05F00");    // 5.1:1 on white
+    private static readonly Brush SlaveRow = Frozen("#F7F9FB");
+
+    public static Brush Text(string? sender) => sender switch
+    {
+        "master" => MasterText,
+        "slave" => SlaveText,
+        _ => SystemColors.ControlTextBrush,
+    };
+
+    public static Brush Row(string? sender) =>
+        sender == "slave" ? SlaveRow : Brushes.Transparent;
+
+    private static Brush Frozen(string hex)
+    {
+        var b = new SolidColorBrush((Color)ColorConverter.ConvertFromString(hex)!);
+        b.Freeze();
+        return b;
+    }
+}
+
+/// <summary>How the Time column reads.</summary>
+public enum TimestampMode
+{
+    /// <summary>Time of day, from a wall clock anchored to the start of the capture.</summary>
+    Absolute,
+    /// <summary>Seconds since the first frame of the capture.</summary>
+    Relative,
+    /// <summary>Seconds since the previous row of the same pane.</summary>
+    Delta,
+}
+
+/// <summary>
+/// Where the Time column's three readings come from. The hardware timestamp is the only clock
+/// the device gives us, so absolute time is that timestamp carried on a wall-clock reading
+/// taken once, at the frame the capture started from — accurate relative to itself, and honest
+/// about the offset it inherited.
+/// </summary>
+/// <param name="ZeroTs">Hardware timestamp of the first frame of the capture.</param>
+/// <param name="ZeroWall">Wall clock observed at that frame.</param>
+public readonly record struct TimeBase(TimestampMode Mode, double ZeroTs, DateTime ZeroWall)
+{
+    public string Format(double ts, double delta) => Mode switch
+    {
+        TimestampMode.Absolute => ZeroWall.AddSeconds(ts - ZeroTs).ToString("HH:mm:ss.ffffff"),
+        TimestampMode.Delta => delta.ToString("0.000000"),
+        _ => (ts - ZeroTs).ToString("0.000000"),
+    };
+
+    public string ColumnHeader => Mode switch
+    {
+        TimestampMode.Absolute => "Time",
+        TimestampMode.Delta => "Δt [s]",
+        _ => "Time [s]",
+    };
+}
+
 /// <summary>Immutable, pre-formatted row for the trace view.</summary>
 public sealed class TraceRow
 {
@@ -65,20 +139,54 @@ public sealed class TraceRow
     public required string Data { get; init; }
     public string? Type { get; init; }
     public string? Decoded { get; init; }
+    public string? Sender { get; init; }
     public required Brush ChanTint { get; init; }
 
-    public static TraceRow From(CanFrame f) => new()
+    /// <summary>
+    /// Precomputed rather than resolved by a style trigger. A DataTrigger on Sender would make
+    /// WPF subscribe to this row through PropertyDescriptor — TraceRow has no change
+    /// notification — once per cell per realised row, which is the churn that OneTime bindings
+    /// were introduced to remove.
+    /// </summary>
+    public required Brush SenderBrush { get; init; }
+    public required Brush RowBackground { get; init; }
+
+    /// <summary>Raw hardware timestamp, kept so the Time column can be re-read in another mode.</summary>
+    public required double Ts { get; init; }
+
+    /// <summary>Seconds since the previous row of the pane that built this one.</summary>
+    public required double Delta { get; init; }
+
+    public static TraceRow From(CanFrame f, TimeBase time, double previousTs)
     {
-        Time = f.Timestamp.ToString("0.000000"),
-        Chan = f.Channel,
-        ChanTint = ChannelPalette.Tint(f.Channel),
-        Dir = f.Direction == FrameDirection.Tx ? "TX" : "RX",
-        Id = f.IdText,
-        Flags = FlagsText(f),
-        Dlc = f.Data.Length.ToString(),
-        Data = FormatData(f.Data),
-        Type = f.Annotation?.Type,
-        Decoded = f.Annotation?.Comment,
+        double delta = double.IsNaN(previousTs) ? 0 : f.Timestamp - previousTs;
+        return new TraceRow
+        {
+            Ts = f.Timestamp,
+            Delta = delta,
+            Time = time.Format(f.Timestamp, delta),
+            Chan = f.Channel,
+            ChanTint = ChannelPalette.Tint(f.Channel),
+            Dir = f.Direction == FrameDirection.Tx ? "TX" : "RX",
+            Id = f.IdText,
+            Flags = FlagsText(f),
+            Dlc = f.Data.Length.ToString(),
+            Data = FormatData(f.Data),
+            Type = f.Annotation?.Type,
+            Decoded = f.Annotation?.Comment,
+            Sender = f.Annotation?.Sender,
+            SenderBrush = SenderPalette.Text(f.Annotation?.Sender),
+            RowBackground = SenderPalette.Row(f.Annotation?.Sender),
+        };
+    }
+
+    /// <summary>The same row read on a different clock. Everything else is already formatted.</summary>
+    public TraceRow WithTime(TimeBase time) => new()
+    {
+        Ts = Ts, Delta = Delta, Time = time.Format(Ts, Delta),
+        Chan = Chan, ChanTint = ChanTint, Dir = Dir, Id = Id, Flags = Flags,
+        Dlc = Dlc, Data = Data, Type = Type, Decoded = Decoded, Sender = Sender,
+        SenderBrush = SenderBrush, RowBackground = RowBackground,
     };
 
     public static string FlagsText(CanFrame f)

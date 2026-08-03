@@ -30,7 +30,7 @@
         </DataTemplate>
     </UserControl.Resources>
 
-    <Grid>
+    <Grid PreviewMouseWheel="Pane_PreviewMouseWheel">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
@@ -47,6 +47,13 @@
                     <ComboBoxItem Content="Trace"/>
                     <ComboBoxItem Content="Fixed"/>
                 </ComboBox>
+                <ComboBox x:Name="ContentCombo" Width="125" Margin="6,0,0,0" SelectedIndex="0"
+                          SelectionChanged="Pane_Changed"
+                          ToolTip="Narrow this pane to one side of the protocol. XCP commands are the CTO exchange; XCP data is the DAQ/STIM stream.">
+                    <ComboBoxItem Content="All frames"/>
+                    <ComboBoxItem Content="XCP commands"/>
+                    <ComboBoxItem Content="XCP data"/>
+                </ComboBox>
                 <TextBlock x:Name="PaneStats" VerticalAlignment="Center" Margin="10,0,0,0" Foreground="Gray"/>
             </StackPanel>
         </Border>
@@ -57,6 +64,17 @@
         <local:TraceListView x:Name="TraceList" Grid.Row="1" FontFamily="Consolas" FontSize="12"
                   VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"
                   ToolTip="Running: the view follows the newest row. Pause (F7) to scroll back through what was captured.">
+            <!-- A neutral wash on the answering side, so a command and its response read as a
+                 pair. Bound OneTime off a precomputed brush rather than driven by a trigger —
+                 see TraceRow.SenderBrush. Transparent when no protocol names a sender. -->
+            <!-- No BasedOn: the theme style still supplies every property this one leaves
+                 alone, including the template, and {StaticResource {x:Type ListViewItem}} does
+                 not resolve here. -->
+            <ListView.ItemContainerStyle>
+                <Style TargetType="ListViewItem">
+                    <Setter Property="Background" Value="{Binding RowBackground, Mode=OneTime}"/>
+                </Style>
+            </ListView.ItemContainerStyle>
             <!-- Every column binds OneTime. A TraceRow is an immutable snapshot, but WPF cannot
                  know that: with the default OneWay mode and a plain CLR source that does not
                  implement INotifyPropertyChanged, it subscribes through PropertyDescriptor for
@@ -67,15 +85,43 @@
                  and attaches nothing. -->
             <ListView.View>
                 <GridView>
-                    <GridViewColumn Header="Time [s]" Width="95" DisplayMemberBinding="{Binding Time, Mode=OneTime}"/>
+                    <GridViewColumn x:Name="TimeColumn" Header="Time [s]" Width="105"
+                                    DisplayMemberBinding="{Binding Time, Mode=OneTime}"/>
                     <GridViewColumn Header="Chan" Width="55" CellTemplate="{StaticResource ChannelChip}"/>
                     <GridViewColumn Header="Dir" Width="38" DisplayMemberBinding="{Binding Dir, Mode=OneTime}"/>
                     <GridViewColumn Header="ID" Width="80" DisplayMemberBinding="{Binding Id, Mode=OneTime}"/>
                     <GridViewColumn Header="Flags" Width="70" DisplayMemberBinding="{Binding Flags, Mode=OneTime}"/>
                     <GridViewColumn Header="DLC" Width="38" DisplayMemberBinding="{Binding Dlc, Mode=OneTime}"/>
                     <GridViewColumn Header="Data" Width="300" DisplayMemberBinding="{Binding Data, Mode=OneTime}"/>
-                    <GridViewColumn Header="Frame type" Width="185" DisplayMemberBinding="{Binding Type, Mode=OneTime}"/>
-                    <GridViewColumn Header="Comments" Width="460" DisplayMemberBinding="{Binding Decoded, Mode=OneTime}"/>
+                    <!-- Removed from the view at construction; ShowSenderColumn puts it back
+                         while a protocol that has two sides is selected. -->
+                    <GridViewColumn x:Name="SenderColumn" Header="Sender" Width="70">
+                        <GridViewColumn.CellTemplate>
+                            <DataTemplate>
+                                <TextBlock Text="{Binding Sender, Mode=OneTime}"
+                                           Foreground="{Binding SenderBrush, Mode=OneTime}"/>
+                            </DataTemplate>
+                        </GridViewColumn.CellTemplate>
+                    </GridViewColumn>
+                    <!-- Everything from Sender rightward is the protocol's own reading of the
+                         frame, so it carries the sender's colour. The columns to the left are
+                         what the bus said and stay in the default ink. -->
+                    <GridViewColumn x:Name="TypeColumn" Header="Frame type" Width="185">
+                        <GridViewColumn.CellTemplate>
+                            <DataTemplate>
+                                <TextBlock Text="{Binding Type, Mode=OneTime}"
+                                           Foreground="{Binding SenderBrush, Mode=OneTime}"/>
+                            </DataTemplate>
+                        </GridViewColumn.CellTemplate>
+                    </GridViewColumn>
+                    <GridViewColumn Header="Comments" Width="460">
+                        <GridViewColumn.CellTemplate>
+                            <DataTemplate>
+                                <TextBlock Text="{Binding Decoded, Mode=OneTime}"
+                                           Foreground="{Binding SenderBrush, Mode=OneTime}"/>
+                            </DataTemplate>
+                        </GridViewColumn.CellTemplate>
+                    </GridViewColumn>
                 </GridView>
             </ListView.View>
         </local:TraceListView>

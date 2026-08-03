@@ -13,7 +13,12 @@ namespace CanTerminal.Core;
 /// travel on the same response ID, and merging them into one row makes the period and the
 /// data column meaningless. 0 (the default) means "do not split".
 /// </param>
-public sealed record FrameAnnotation(string? Type, string? Comment, int GroupKey = 0);
+/// <param name="Sender">
+/// Which side of a request/response protocol put the frame on the bus — "master" or "slave"
+/// for XCP. Null when the protocol has no such notion, or none is configured. On a two-node
+/// exchange the CAN ID already says this, but only if you have the session's IDs memorised.
+/// </param>
+public sealed record FrameAnnotation(string? Type, string? Comment, int GroupKey = 0, string? Sender = null);
 
 /// <summary>
 /// Combines the DBC decoder with the optional protocol profile (currently XCP).

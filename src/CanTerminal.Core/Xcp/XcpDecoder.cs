@@ -65,7 +65,12 @@ public sealed class XcpDecoder
 
         bool fromMaster = f.ArbId == _config.RequestId || f.ArbId == _config.BroadcastId;
         lock (_lock)
-            return fromMaster ? DecodeMaster(f) : DecodeSlave(f);
+        {
+            var annotation = fromMaster ? DecodeMaster(f) : DecodeSlave(f);
+            // Stamped once here rather than at each of the return sites below: which side sent
+            // the frame follows from the CAN ID alone, and nothing in the decode can change it.
+            return annotation with { Sender = fromMaster ? "master" : "slave" };
+        }
     }
 
     // ---------------- master → slave ----------------

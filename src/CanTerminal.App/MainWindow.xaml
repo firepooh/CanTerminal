@@ -119,6 +119,10 @@
         <CommandBinding Command="{x:Static local:AppCommands.LayoutSingle}"   Executed="LayoutSingle_Executed"/>
         <CommandBinding Command="{x:Static local:AppCommands.LayoutSplitH}"   Executed="LayoutSplitH_Executed"/>
         <CommandBinding Command="{x:Static local:AppCommands.LayoutSplitV}"   Executed="LayoutSplitV_Executed"/>
+        <CommandBinding Command="{x:Static local:AppCommands.LayoutXcpSplit}" Executed="LayoutXcpSplit_Executed" CanExecute="CanSplitForXcp"/>
+        <CommandBinding Command="{x:Static local:AppCommands.FontLarger}"     Executed="FontLarger_Executed"/>
+        <CommandBinding Command="{x:Static local:AppCommands.FontSmaller}"    Executed="FontSmaller_Executed"/>
+        <CommandBinding Command="{x:Static local:AppCommands.FontReset}"      Executed="FontReset_Executed"/>
         <CommandBinding Command="{x:Static local:AppCommands.JumpToLive}"     Executed="JumpToLive_Executed"/>
         <CommandBinding Command="{x:Static local:AppCommands.TogglePause}"    Executed="TogglePause_Executed"/>
         <CommandBinding Command="{x:Static local:AppCommands.ClearAll}"       Executed="ClearAll_Executed"/>
@@ -180,12 +184,36 @@
                               Command="{x:Static local:AppCommands.LayoutSplitH}"/>
                     <MenuItem x:Name="MenuLayoutSplitV" Header="Split _vertically  ↕" IsCheckable="True"
                               Command="{x:Static local:AppCommands.LayoutSplitV}"/>
+                    <Separator/>
+                    <MenuItem x:Name="MenuLayoutXcp" Header="_XCP command / data split"
+                              Command="{x:Static local:AppCommands.LayoutXcpSplit}"
+                              ToolTip="Stack the panes: the CTO exchange as a trace above, the DAQ stream aggregated per ODT below. Applied automatically when the XCP profile is selected."/>
                 </MenuItem>
                 <MenuItem x:Name="MenuPaneA" Header="Pane _A" SubmenuOpened="PaneAMenu_Opened">
                     <MenuItem Header="(none)" IsEnabled="False"/>
                 </MenuItem>
                 <MenuItem x:Name="MenuPaneB" Header="Pane _B" SubmenuOpened="PaneBMenu_Opened">
                     <MenuItem Header="(none)" IsEnabled="False"/>
+                </MenuItem>
+                <Separator/>
+                <MenuItem Header="Te_xt size"
+                          ToolTip="Also Ctrl + mouse wheel over either pane.">
+                    <MenuItem Header="_Larger" Command="{x:Static local:AppCommands.FontLarger}"/>
+                    <MenuItem Header="_Smaller" Command="{x:Static local:AppCommands.FontSmaller}"/>
+                    <MenuItem Header="_Reset" Command="{x:Static local:AppCommands.FontReset}"/>
+                </MenuItem>
+                <Separator/>
+                <MenuItem Header="_Timestamps"
+                          ToolTip="How the trace Time column reads. Delta is measured against the previous row of the same pane, so a filtered pane shows the gaps you can actually see.">
+                    <MenuItem x:Name="MenuTsAbsolute" Header="_absolute" IsCheckable="True"
+                              Click="Timestamps_Click"
+                              ToolTip="Time of day, anchored to the first frame of the capture."/>
+                    <MenuItem x:Name="MenuTsRelative" Header="_relative" IsCheckable="True" IsChecked="True"
+                              Click="Timestamps_Click"
+                              ToolTip="Seconds since the first frame of the capture."/>
+                    <MenuItem x:Name="MenuTsDelta" Header="_delta" IsCheckable="True"
+                              Click="Timestamps_Click"
+                              ToolTip="Seconds since the previous row shown in the same pane."/>
                 </MenuItem>
                 <Separator/>
                 <MenuItem x:Name="MenuHighlight" Header="_Highlight changes" IsCheckable="True" IsChecked="True"

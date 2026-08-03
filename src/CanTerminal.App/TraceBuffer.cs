@@ -146,6 +146,22 @@ public sealed class TraceBuffer : IList, INotifyCollectionChanged
     }
 
     /// <summary>
+    /// Replaces every row with the result of <paramref name="map"/> and re-publishes. Used when
+    /// a column has to be re-read on a different basis — the rows are pre-formatted, so there
+    /// is nothing to recompute except the one field that changed.
+    /// </summary>
+    public void Rebuild(Func<TraceRow, TraceRow> map)
+    {
+        for (int i = 0; i < _count; i++)
+        {
+            int slot = (_start + i) % _ring.Length;
+            if (_ring[slot] is { } row) _ring[slot] = map(row);
+        }
+        ClearPending();
+        Reset();
+    }
+
+    /// <summary>
     /// Re-publishes the collection in full and drops any unreported batch. Needed wherever the
     /// view may have stopped tracking the buffer — while the list was hidden, or while it was
     /// bound to the held snapshot instead. Reporting only the pending batch there would be

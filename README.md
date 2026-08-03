@@ -32,7 +32,7 @@ dotnet build CanTerminal.slnx
 |---|---|
 | **File** | Load DBC… (`Ctrl+D`) · Recent DBC ▸ (최근 9개) · Unload DBC · Save trace as CSV… (`Ctrl+S`) |
 | **Bus** | Refresh devices (`F5`) · Device ▸ · Channels… (`Ctrl+Shift+C`) · Bitrate ▸ · CAN FD ▸ · Connect (`F9`) / Disconnect (`Shift+F9`) |
-| **View** | Layout ▸ (`Ctrl+1/2/3`) · Pane A ▸ / Pane B ▸ · Highlight changes · Jump to newest (`End`) · History size… · Pause display (`F7`) · Clear all (`Ctrl+L`) |
+| **View** | Layout ▸ (`Ctrl+1/2/3`, XCP split `Ctrl+4`) · Pane A ▸ / Pane B ▸ · Text size ▸ (`Ctrl+±`, `Ctrl+0`, Ctrl+휠) · Timestamps ▸ · Highlight changes · Jump to newest (`End`) · History size… · Pause display (`F7`) · Clear all (`Ctrl+L`) |
 | **Transmit** | Send frame (`Ctrl+Enter`) · Start/Stop cyclic TX (`F6` / `Shift+F6`) · Cycle time… · TX channel ▸ · Extended ID / CAN FD frame / Bit rate switch |
 | **Profile** | None / XCP on CAN · Set IDs on channel… · Remove session on channel ▸ · Detect all from capture · Load IDs from A2L… · Show XCP IDs only |
 | **Tools** | API server · API server port… · Copy python snippet |
@@ -111,6 +111,26 @@ CAN1@500000:2000000,CAN2     CAN1만 FD 데이터 비트레이트 지정
 > 목록이 숨겨져 있는 동안(Fixed 뷰)에는 통지를 미룹니다. 대신 다시 보이는 순간 **전체
 > 재동기화**합니다 — 통지 없이 컬렉션만 바뀐 상태로 두면 WPF가 나중에 그걸 감지해서
 > 예외로 앱을 죽입니다 (`실제 개수 9216이 예상 개수 0과 다릅니다`).
+
+### 시간 표시와 글자 크기
+
+`View ▸ Timestamps`로 Time 열의 기준을 고릅니다:
+
+| 모드 | 표시 | 헤더 |
+|---|---|---|
+| absolute | 시각 `12:00:00.250000` | `Time` |
+| relative (기본) | 캡처 첫 프레임부터 경과 | `Time [s]` |
+| delta | **같은 패널의 직전 행**과의 간격 | `Δt [s]` |
+
+delta가 패널 기준인 것은 의도입니다 — 필터가 걸린 패널에서 화면에 없는 행과의 간격을 보여주면
+읽을 수가 없습니다. 모드를 바꿔도 **화면은 지워지지 않습니다**: 행이 원시 타임스탬프와 델타를
+같이 들고 있어서 Time 열만 다시 씁니다 (일시정지해놓고 뜯어볼 때가 delta가 제일 필요한 순간).
+
+absolute의 기준점은 캡처 **첫 프레임 시점의 벽시계**입니다. 장비가 주는 건 하드웨어 타임스탬프
+뿐이라, 프레임 간 정밀도는 하드웨어 그대로이고 절대 시각은 그 앵커만큼의 오차를 물려받습니다.
+
+글자 크기는 **Ctrl + 휠**, `Ctrl +` / `Ctrl -`, `Ctrl 0`(복귀). 8~28 pt이고 두 패널이 같은
+값을 씁니다. 컬럼 폭도 같은 비율로 늘어납니다 — 폭이 픽셀 고정이라 안 그러면 바로 잘립니다.
 
 ### 지나간 데이터를 보려면 Pause (Vehicle Spy 방식)
 
@@ -268,7 +288,8 @@ with CanTerminalClient() as ct:              # 127.0.0.1:29536
 
 `id`는 숫자(10진) 또는 문자열(16진, `"0x123"`/`"123"`). 모든 요청에 `seq`를 넣으면 응답에 그대로 돌아옵니다.
 프레임의 `ts`는 하드웨어 타임스탬프(초), `dir`은 `rx`/`tx`, `type`은 프로토콜 프로파일이 붙인 프레임
-종류(`"CTO (CONNECT)"` 등), `decoded`는 프로토콜 파라미터 / DBC 신호값 문자열.
+종류(`"CTO (CONNECT)"` 등), `decoded`는 프로토콜 파라미터 / DBC 신호값 문자열,
+`sender`는 요청/응답 프로토콜에서 보낸 쪽(`"master"` / `"slave"`, 해당 없으면 null).
 
 ## 프로토콜 프로파일 — XCP on CAN
 
@@ -300,6 +321,46 @@ DAQ-DTO의 PID는 `ALLOC_DAQ`/`ALLOC_ODT` 시퀀스를 따라가야 DAQ/ODT 번�
 
 > 캡처 중간부터 붙어서 DAQ 할당을 못 본 경우, DAQ/ODT 번호를 추측하지 않고
 > `DAQ-DTO (PID = 0x02)`처럼 표시하고 이유를 코멘트에 남깁니다.
+
+### XCP를 켜면 화면이 명령/데이터로 갈립니다
+
+한 세션의 두 절반은 서로 반대되는 뷰를 원합니다. 그래서 `Profile ▸ XCP on CAN`을 고르면
+자동으로 상/하 분할로 전환됩니다 (수동은 `View ▸ Layout ▸ XCP command / data split`, `Ctrl+4`):
+
+| | 뷰 | 내용 |
+|---|---|---|
+| 상단 | Trace | **XCP commands** — CTO 교환만. CONNECT / ALLOC / WRITE_DAQ의 **순서**가 의미인 쪽 |
+| 하단 | Fixed | **XCP data** — DAQ/STIM 스트림만, ODT별 한 줄. 순서는 노이즈고 **주기와 변경 바이트**가 의미인 쪽 |
+
+분류는 디코더가 이미 해둔 것을 씁니다 — CTO는 집계 그룹 0, 모든 DTO는 `PID + 1`이라 따로
+판별할 게 없습니다. 패널 헤더의 **Show** 콤보(`All frames / XCP commands / XCP data`)로 직접
+조합할 수도 있습니다.
+
+> 프리셋은 두 패널을 모두 채널 `All`로 맞춥니다. 안 그러면 2포트 마스터에서 위는 CAN1 명령,
+> 아래는 CAN2 데이터가 되어 짝이 어긋납니다.
+
+### Sender 열 — master / slave
+
+XCP 프로파일에서만 `Data`와 `Frame type` 사이에 나타납니다. request(또는 broadcast) ID로 오면
+`master`, response ID로 오면 `slave` — CAN ID만으로 정해지므로 디코드 진입점에서 한 번 찍습니다.
+
+**Sender부터 오른쪽(Sender · Frame type · Comments)** 이 보낸 쪽 색을 따릅니다. 왼쪽은 버스가
+실제로 말한 것이고 오른쪽은 디코더의 해석이라, 해석 쪽만 물들이는 게 경계로도 맞습니다.
+
+| | 값 | 흰 배경 대비 |
+|---|---|---|
+| master | `#1F6FB2` | 5.3 : 1 |
+| slave | `#A05F00` | 5.1 : 1 |
+| slave 행 배경 | `#F7F9FB` (무채색) | — |
+
+행 배경을 색조로 칠하지 않는 이유는 **채널 칩이 이미 파스텔 파랑·주황을 쓰고 있어서**입니다.
+같은 색조를 얹으면 그 색이 채널을 뜻하는지 sender를 뜻하는지 알 수 없게 됩니다. 글자색은 이
+프로토콜을 흔히 그리는 파랑/주황보다 어둡습니다 — 원래 색은 포스터용이라 12 pt 본문에서 대비가
+2:1 수준입니다. 파랑/주황 조합은 적록색약에서도 구분됩니다.
+
+> 구현 주의: 색은 `TraceRow`를 만들 때 **미리 계산한 얼린 브러시**를 `Mode=OneTime`으로 물립니다.
+> `DataTrigger`를 쓰면 `TraceRow`에 변경 알림이 없어 셀마다 `PropertyDescriptor` 구독이 붙고,
+> 위에서 없앤 finalizer 부하가 그대로 돌아옵니다.
 
 ### Fixed 뷰는 XCP DTO를 ODT별로 분리합니다
 
