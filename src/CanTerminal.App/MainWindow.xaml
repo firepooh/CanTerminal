@@ -3,6 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:local="clr-namespace:CanTerminal.App"
         Title="CanTerminal — ValueCAN Monitor" Height="760" Width="1280"
+        Icon="pack://application:,,,/canterminal.ico"
         Closing="Window_Closing">
     <Window.Resources>
         <!-- Toolbar breathing room. Safe as implicit styles: nothing in the panes is harmed by

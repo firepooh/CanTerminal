@@ -8,10 +8,18 @@
     <Nullable>enable</Nullable>
     <AssemblyName>CanTerminal</AssemblyName>
     <RootNamespace>CanTerminal.App</RootNamespace>
+    <!-- Embedded in the exe: Explorer, the taskbar and Alt-Tab read it from there. -->
+    <ApplicationIcon>..\..\GUI\canterminal.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\CanTerminal.Core\CanTerminal.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Also as a resource, so the window can name it explicitly rather than relying on WPF
+         falling back to the host process's icon. -->
+    <Resource Include="..\..\GUI\canterminal.ico" Link="canterminal.ico" />
   </ItemGroup>
 
 </Project>
