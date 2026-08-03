@@ -19,22 +19,56 @@ dotnet build CanTerminal.slnx
 
 - 모니터: `src\CanTerminal.App\bin\Debug\net10.0-windows\CanTerminal.exe`
 - Fixed 뷰에서는 **값이 바뀐 데이터 바이트만** 파랗게 강조되고 약 1.4초에 걸쳐 서서히 사라집니다
-  (`Highlight changes` 체크박스로 끌 수 있음). 처음 보는 ID는 비교 대상이 없으므로 강조하지 않습니다.
-- 하드웨어 없이 개발: Device에서 **Virtual bus** 선택 → 주기 프레임 생성 + 송신 프레임을 `ID+0x100`으로 에코 응답
+  (`View ▸ Highlight changes`로 끌 수 있음). 처음 보는 ID는 비교 대상이 없으므로 강조하지 않습니다.
+- 하드웨어 없이 개발: `Bus ▸ Device`에서 **Virtual bus** 선택 → 주기 프레임 생성 + 송신 프레임을 `ID+0x100`으로 에코 응답
 - ValueCAN: Intrepid 드라이버(icsneo40.dll) 설치 필요. 채널 이름은 `CAN1`(HSCAN), `CAN2`(HSCAN2), `CAN3`, `CAN4`, `MSCAN`(ValueCAN3의 2번째 채널), `SWCAN`
+
+## 화면 구성 — 메뉴 바 + 한 줄 툴바
+
+**툴바에는 트래픽이 흐르는 동안 계속 만지는 것만** 남깁니다: Connect, TX 입력 한 줄
+(채널/ID/Data/Send/Start), Pause, Clear. 세션당 한 번 정하는 설정은 전부 메뉴로 내려갔습니다.
+
+| 메뉴 | 내용 |
+|---|---|
+| **File** | Load DBC… (`Ctrl+D`) · Recent DBC ▸ (최근 9개) · Unload DBC · Save trace as CSV… (`Ctrl+S`) |
+| **Bus** | Refresh devices (`F5`) · Device ▸ · Channels… (`Ctrl+Shift+C`) · Bitrate ▸ · CAN FD ▸ · Connect (`F9`) / Disconnect (`Shift+F9`) |
+| **View** | Layout ▸ (`Ctrl+1/2/3`) · Pane A ▸ / Pane B ▸ · Highlight changes · Jump to newest (`End`) · History size… · Pause display (`F7`) · Clear all (`Ctrl+L`) |
+| **Transmit** | Send frame (`Ctrl+Enter`) · Start/Stop cyclic TX (`F6` / `Shift+F6`) · Cycle time… · TX channel ▸ · Extended ID / CAN FD frame / Bit rate switch |
+| **Profile** | None / XCP on CAN · Set IDs on channel… · Remove session on channel ▸ · Detect all from capture · Load IDs from A2L… · Show XCP IDs only |
+| **Tools** | API server · API server port… · Copy python snippet |
+| **Help** | Keyboard shortcuts (`Ctrl+/`) · README on GitHub · About |
+
+메뉴로 숨긴 설정의 현재 값은 툴바 오른쪽 **요약 줄**에 항상 떠 있습니다:
+
+```
+CAN1,CAN2 · 500k · no DBC · Profile: None
+```
+
+숨겼다고 상태까지 안 보이면 안 되기 때문입니다. 같은 이유로 Start 버튼은
+`Start · 100 ms`처럼 현재 주기를 라벨에 달고 다닙니다.
+
+상황에 맞지 않는 항목은 비활성화됩니다 — 미연결이면 Transmit 전체와 Disconnect,
+DBC 미로드면 Unload DBC, Layout이 Single이면 Pane B, Profile이 None이면 XCP 항목 전체.
+연결 중에는 Device/Bitrate/CAN FD가 잠깁니다.
+
+> 패널의 Channel 선택과 Trace/Fixed 전환은 **패널 헤더에 그대로** 있습니다.
+> 창 메뉴로 올리면 어느 패널 얘기인지 모호해집니다 (메뉴의 Pane A/B는 같은 값을 미러링합니다).
+
+이 배치의 근거와 컨트롤 이동 매핑표는 [design_handoff_menu/README.md](design_handoff_menu/README.md)에
+있습니다 (같은 폴더의 `.dc.html`은 브라우저로 열면 그대로 렌더되는 디자인 레퍼런스).
 
 ## 다중 채널
 
-`Channels`에 콤마로 나열합니다 (`CAN1,CAN2`). 채널마다 속도가 다르면 `NAME@bitrate[:fdbitrate]`로
-개별 지정하고, `@`가 없는 채널은 툴바 비트레이트를 씁니다:
+`Bus ▸ Channels…`에 콤마로 나열합니다 (`CAN1,CAN2`). 채널마다 속도가 다르면 `NAME@bitrate[:fdbitrate]`로
+개별 지정하고, `@`가 없는 채널은 `Bus ▸ Bitrate` 값을 씁니다:
 
 ```
-CAN1,CAN2                    두 채널 모두 툴바 비트레이트
+CAN1,CAN2                    두 채널 모두 Bus ▸ Bitrate
 CAN1@500000,CAN2@125000      파워트레인 500k + 바디 125k
 CAN1@500000:2000000,CAN2     CAN1만 FD 데이터 비트레이트 지정
 ```
 
-**Layout**으로 화면을 나눕니다:
+**View ▸ Layout**으로 화면을 나눕니다:
 
 | 모드 | 용도 |
 |---|---|
@@ -49,25 +83,51 @@ CAN1@500000:2000000,CAN2     CAN1만 FD 데이터 비트레이트 지정
 
 > 패널을 숨기면 그 패널의 행은 버려집니다(다시 열면 그 시점부터 쌓임). 채널을 바꿔도 마찬가지로
 > 비워집니다 — 이전 필터로 모인 행이 남으면 살아있는 트래픽처럼 읽히기 때문입니다.
-> `Save CSV…`는 화면이 아니라 **캡처 버퍼 전체**를 내보냅니다 (패널이 둘이면 "화면"이 모호하므로).
+> `File ▸ Save trace as CSV…`는 화면이 아니라 **캡처 버퍼 전체**를 내보냅니다
+> (패널이 둘이면 "화면"이 모호하므로).
 
 ### 트레이스 히스토리 (순환 버퍼)
 
-`History`로 패널당 보관할 트레이스 행 수를 정합니다 (기본 50,000, 최소 100). 가득 차면
+`View ▸ History size…`로 패널당 보관할 트레이스 행 수를 정합니다 (기본 50,000, 최소 100). 가득 차면
 **가장 오래된 행을 제자리에서 덮어씁니다** — 재할당도, 목록 재생성도 없습니다.
 
 행 추가는 조용히 일어나고 화면 갱신은 UI 틱당 **한 번**만 통지됩니다. 프레임마다 통지하면
 초당 수천 번 목록을 깨우게 되는데, 실제로 UI를 멈추는 원인이 이것입니다 (그리고 초당 수천 줄이
 다시 그려지는 목록은 어차피 읽을 수 없습니다).
 
-**지나간 데이터 보기**: 스크롤을 위로 올리면 화면이 **그 자리에 고정**되고 헤더에 `▼ Live`
-버튼이 나타납니다. 그동안에도 캡처는 계속되며, 맨 아래로 다시 스크롤하거나 `▼ Live`를 누르면
-최신 위치로 돌아가 다시 따라갑니다.
+그 한 번의 통지는 **실제로 바뀐 것만** 알립니다 — 앞에서 밀려난 행은 `Remove`, 뒤에 붙은 행은
+`Add`. `Reset`(전부 바뀌었다고 알리기)을 쓰면 WPF가 실체화된 행 컨테이너를 **전부 버리고** 화면을
+처음부터 다시 만드는데, 그 비용은 새로 온 행이 5개든 5,000개든 똑같습니다. 실측으로 한 번에
+약 15 ms, 초당 20번이라 **버스가 한산해도 코어 하나의 30~50%가 상시로 나갔습니다.**
 
-> 고정 중에는 그 시점의 사본을 보여줍니다. 순환 버퍼는 계속 덮어써지므로, 사본 없이 그냥
-> 두면 읽고 있는 줄이 갱신 때마다 밀려 내려갑니다 (실측: 20행 추가에 5행, 한 바퀴 돌면 77행).
-> 이 사본은 인스턴스 하나를 재사용합니다 — WPF는 `ItemsSource`에 넘긴 컬렉션마다 뷰를 하나씩
-> 잡고 그 뷰가 행들을 살려두므로, 스크롤할 때마다 새 컬렉션을 만들면 히스토리 전체가 누수됩니다.
+| 2패널 Trace, 히스토리 5만 | Reset 방식 | 변경분만 통지 |
+|---|---|---|
+| 합계 1,080 fps (채널당 540) | CPU 56%, 입력 지연 p95 21 ms | CPU 34%, p95 **2.5 ms** |
+| 합계 4,000 fps | CPU 63%, p95 20 ms | CPU 37%, p95 **2.2 ms** |
+| 합계 20,000 fps | CPU 77%, 지연 중앙값 17 ms / p95 116 ms | CPU 62%, 중앙값 6 ms / p95 **29 ms** |
+
+한 틱에 512행을 넘게 받으면 그때는 화면 전체가 어차피 교체되므로 `Reset` 한 번으로 되돌립니다.
+
+> 목록이 숨겨져 있는 동안(Fixed 뷰)에는 통지를 미룹니다. 대신 다시 보이는 순간 **전체
+> 재동기화**합니다 — 통지 없이 컬렉션만 바뀐 상태로 두면 WPF가 나중에 그걸 감지해서
+> 예외로 앱을 죽입니다 (`실제 개수 9216이 예상 개수 0과 다릅니다`).
+
+### 지나간 데이터를 보려면 Pause (Vehicle Spy 방식)
+
+**실행 중에는 트레이스가 항상 최신 행에 고정**됩니다. 지나간 데이터를 읽으려면 `Pause`(F7)를
+누르고 스크롤합니다. 캡처는 계속되고, 다시 재생하면 최신 위치로 돌아갑니다.
+
+이게 유일하게 정직한 동작입니다. 순환 버퍼는 계속 덮어써지므로, 실행 중에 중간에 멈춰 세운
+화면은 읽고 있는 줄이 갱신 때마다 밀려 내려갑니다 (실측: 20행 추가에 5행, 한 바퀴 돌면 77행).
+
+이전에는 스크롤을 올리면 그 시점의 **사본**을 만들어 화면을 고정했습니다. 그 사본 하나를
+유지하느라 메모리 누수 한 건과 크래시 한 건(통지 없이 컬렉션이 바뀌는 구간)을 만들었다가
+잡았습니다. Pause를 전제로 하면 사본 자체가 필요 없습니다 — 멈추면 이미 고정이니까요.
+
+> 성능 목적의 변경은 아닙니다. 실측상 GPU는 23~24%로 **바뀌지 않았습니다** (재그리기 양이
+> 같으므로). 얻는 것은 상태 하나와 그에 딸린 버그 표면의 제거입니다.
+> 같은 이유로 `View ▸ Autoscroll`과 패널의 `▼ Live` 버튼은 없어졌습니다 — 실행 중에는
+> 항상 따라가므로 켜고 끌 것이 없습니다.
 
 ### 화면이 못 따라갈 때
 
@@ -76,7 +136,91 @@ CAN1@500000:2000000,CAN2     CAN1만 FD 데이터 비트레이트 지정
 
 버스가 화면보다 빠르면 표시 대기열이 쌓이는데, 일정 한도를 넘으면 **표시만** 건너뛰고 상태바에
 `display behind: N not shown`으로 알립니다. **캡처는 영향받지 않습니다** — 링버퍼와 TCP API,
-`Save CSV…`에는 모든 프레임이 그대로 있습니다.
+CSV 저장에는 모든 프레임이 그대로 있습니다.
+
+### 화면 갱신은 20 Hz — 병목은 CPU가 아니라 GPU/합성
+
+트레이스 목록을 갱신하는 틱마다 목록 전체가 다시 그려집니다. **4K 최대화 창에서는 이게 앱의
+가장 큰 비용**이고, 그 비용은 CPU가 아니라 **GPU와 DWM(합성기)** 에 떨어집니다. 그래서 앱
+프로세스의 CPU만 보면 멀쩡해 보이는데 컴퓨터 전체가 버벅입니다.
+
+실측 (ValueCAN 2채널, 합계 ~1,080 fps, 4K 최대화, 2패널 Trace, UIA 클라이언트 미부착):
+
+| 갱신 주기 | 머신 CPU | DWM | GPU |
+|---|---|---|---|
+| **50 ms (20 Hz) ← 현재** | 20% | 8% | **34%** |
+| 100 ms (10 Hz) | 10% | 3% | 13% |
+| 200 ms (5 Hz) | 12% | 5% | 9% |
+
+일시정지(목록 갱신 없음)하면 GPU는 4%로 떨어집니다 — 부하는 전부 다시 그리기입니다.
+
+**20 Hz는 비용을 알고 고른 값입니다.** 10 Hz의 약 2.6배를 GPU에 쓰지만 화면이 눈에 띄게
+부드럽습니다. 이 값이 부담되는 환경(약한 내장 GPU, 고해상도 다중 모니터)에서는
+`MainWindow` 생성자의 `_flushTimer` 간격 하나만 바꾸면 됩니다.
+
+> 위 표는 자동화 서브트리를 잘라내기 **전에** 측정한 값입니다. 당시 UIA 클라이언트를 붙이지
+> 않은 상태였으므로 순수 재그리기 비용이고, 그 수정에 영향받지 않습니다.
+
+> 측정 시 주의: 앱을 **살려둔 채로** 재야 합니다. 측정 하네스가 먼저 종료돼 버리면
+> "작업관리자를 켰더니 괜찮더라" 같은 엉뚱한 결론이 나옵니다.
+
+### 트레이스 목록은 UI 자동화 대상에서 제외
+
+가장 컸던 항목입니다. WPF는 **머신에 UI Automation 클라이언트가 하나라도 떠 있으면** 레이아웃
+패스마다 접근성 피어 트리를 다시 만들고 비교합니다. 보조 도구, 원격 제어/화면 공유, IDE와
+테스트 자동화가 전부 UIA 클라이언트로 등록되므로 보통은 뭔가 떠 있습니다.
+
+트레이스 목록은 초당 20번 뷰포트 대부분이 교체되므로, 그 비교가 매번 완전히 새로운 행 집합을
+상대로 돌아갑니다. **4K 최대화 창에서 UI 스레드의 86%** 가 여기 있었습니다 —
+`AutomationPeer.UpdateSubtree` / `RaiseAutomationPropertyChangedEvent`. 실제 레이아웃과 렌더링은
+나머지였습니다. 창이 클수록 보이는 행이 늘어 그대로 비례합니다.
+
+**`OnCreateAutomationPeer()`에서 `null`을 돌려주는 것으로는 안 됩니다.** "피어 없음"은
+"나를 건너뛰고 자식을 보라"는 뜻이라, 아래의 행·셀 피어는 그대로 만들어집니다. 서브트리를
+끊으려면 **피어를 주되 자식이 없다고 답해야** 합니다 —
+[TraceListView](src/CanTerminal.App/TraceListView.cs)의 `GetChildrenCore() => []`.
+
+| 4K 최대화, 2패널 Trace, ~1,080 fps, **UIA 클라이언트 켠 상태** | UI 스레드 | Automation 비중 |
+|---|---|---|
+| 자동화 피어 유지 | 49% of 1코어 | **61.7%** |
+| `null` 반환 (불완전) | 49% of 1코어 | **61.7%** (그대로) |
+| 자식 없는 피어 (현재) | **18%** of 1코어 | **3.2%** |
+
+> 검증 함정: 이 비용은 **UIA 클라이언트가 붙어 있을 때만** 발생합니다. 클라이언트 없이 재면
+> 고쳐진 것처럼 보입니다 — 실제로 그렇게 잘못 판단한 적이 있습니다. 반드시 작업관리자 등을
+> 띄운 상태에서 측정할 것.
+
+> 성능을 측정할 때 창을 UI Automation으로 조작하면 이 비용이 켜집니다. 측정 중에는 붙이지 말 것.
+
+### 트레이스 열은 전부 `Mode=OneTime`
+
+`TraceRow`는 만들어진 뒤 바뀌지 않는 스냅샷이지만 WPF는 그걸 모릅니다. 기본 `OneWay` 바인딩에
+`INotifyPropertyChanged`가 없는 평범한 CLR 객체를 물리면, WPF는 **셀마다 `PropertyDescriptor`로
+변경 알림을 구독**하고 행이 화면 밖으로 나가면 해지합니다.
+
+버스 속도에서는 뷰포트가 초당 20번 통째로 갈리므로 (채널당 540 fps면 틱마다 ~27행), 이게
+초당 수천 번의 구독/해지가 되어 공용 정적 테이블에 몰립니다. 실측 트레이스에서 이것만으로
+**finalizer 스레드가 코어 하나를 100% 점유**하고 있었습니다 (`ConditionalWeakTable`).
+
+`Mode=OneTime`은 값을 한 번 읽고 아무것도 붙이지 않습니다. 행이 불변이므로 의미도 정확합니다.
+
+### 수신 경로 — 마샬링 금지
+
+`icsneoGetMessages`는 최대 20,000개 메시지를 담는 버퍼를 받습니다. 이걸 `IcsSpyMessage[]`
+(관리 배열)로 선언하면 런타임이 **호출마다 20,000개 전부를 마샬링**합니다 — 실제로 도착한
+프레임이 1개든 1,000개든 1.4 MB를 왕복시키고, 그게 초당 20번입니다. 실기기 CPU 트레이스에
+`MngdNativeArrayMarshaler`로 잡혔고, 수신 스레드 시간의 상당 부분이 여기 있었습니다.
+
+그래서 버퍼는 `NativeMemory.Alloc`으로 한 번 잡고 **raw pointer**로 넘깁니다. 프레임당 호출되는
+`icsneoGetTimeStampForMsg`도 `ref` 대신 포인터입니다 (`ref`는 구조체를 양방향으로 복사합니다).
+
+실측 (ValueCAN 2채널 500 kbit/s, 합계 ~1,080 fps, 2패널 Trace, 히스토리 5만, 자동화 미부착):
+
+| | 캡처만 (일시정지) | 표시 포함 | 입력 지연 p95 |
+|---|---|---|---|
+| 관리 배열 + OneWay 바인딩 | 33.9% | 66 ~ 100% | 21 ~ 26 ms |
+| raw pointer | 3.6% | 43 ~ 60% | 21 ms |
+| + `Mode=OneTime` | 3.6% | **28 ~ 36%** | **1.3 ms** |
 
 ## 파이썬 테스트 연동
 
@@ -128,7 +272,7 @@ with CanTerminalClient() as ct:              # 127.0.0.1:29536
 
 ## 프로토콜 프로파일 — XCP on CAN
 
-툴바의 **Profile**을 `XCP`로 바꾸고 채널별로 req/rsp CAN ID를 넣으면 트레이스에 `Frame type` /
+**Profile ▸ XCP on CAN**을 고르고 채널별로 req/rsp CAN ID를 넣으면 트레이스에 `Frame type` /
 `Comments` 열이 채워집니다. **세션은 채널마다 하나씩** 독립적으로 돌아가므로, 2포트 마스터의
 port1/port2를 (CAN ID 쌍이 다른) 동시에 디코딩할 수 있습니다.
 
@@ -147,9 +291,9 @@ DAQ-DTO의 PID는 `ALLOC_DAQ`/`ALLOC_ODT` 시퀀스를 따라가야 DAQ/ODT 번�
 
 | 방법 | 동작 | 한계 |
 |---|---|---|
-| 직접 입력 | Channel을 고르고 req/rsp를 hex로 입력 후 **Set** (Remove로 해제) | — |
-| **Detect all** | 캡처된 트래픽에서 CONNECT / GET_SLAVE_ID 교환을 찾아 **모든 채널을 한 번에** 설정 (버스에 아무것도 송신하지 않음) | 캡처 안에 명령/응답 쌍이 있어야 함. 이미 돌고 있는 세션에 중간 접속하면 못 찾음 |
-| **From A2L…** | `IF_DATA XCP_ON_CAN`의 `CAN_ID_MASTER`/`CAN_ID_SLAVE`를 읽음. **여러 파일 선택 가능** — 파일명 순서대로 열린 채널에 배정하고 결과를 표로 보여줌 | A2L이 CAN 전송 계층을 기술해야 함 |
+| **Set IDs on channel…** | 채널을 고르고 req/rsp를 hex로 입력 (`Remove session on channel ▸`로 해제). 채널을 바꾸면 그 채널에 이미 설정된 ID 쌍이 다이얼로그에 다시 뜹니다 | — |
+| **Detect all from capture** | 캡처된 트래픽에서 CONNECT / GET_SLAVE_ID 교환을 찾아 **모든 채널을 한 번에** 설정 (버스에 아무것도 송신하지 않음) | 캡처 안에 명령/응답 쌍이 있어야 함. 이미 돌고 있는 세션에 중간 접속하면 못 찾음 |
+| **Load IDs from A2L…** | `IF_DATA XCP_ON_CAN`의 `CAN_ID_MASTER`/`CAN_ID_SLAVE`를 읽음. **여러 파일 선택 가능** — 파일명 순서대로 열린 채널에 배정하고 결과를 표로 보여줌 | A2L이 CAN 전송 계층을 기술해야 함 |
 
 예를 들어 `xcp_daq2x4_p1.a2l`과 `_p2.a2l`을 함께 고르면 p1 → CAN1, p2 → CAN2로 배정되고,
 어떤 파일이 어느 채널에 갔는지 확인 창이 뜹니다 (배정을 조용히 틀리면 안 되므로).
@@ -180,10 +324,10 @@ ID        Count  Period[ms]  DLC  Data                  Frame type
 > 프로파일을 바꾸면 집계 기준이 달라지므로 Fixed 뷰는 초기화됩니다.
 > Trace 뷰와 링버퍼는 그대로입니다.
 
-### XCP IDs only
+### Show XCP IDs only
 
-차량 트래픽이 같이 흐르는 버스에서 XCP 세션만 보고 싶을 때 쓰는 체크박스입니다. req/rsp
-(설정 시 broadcast) ID의 프레임만 Trace/Fixed 뷰에 표시합니다.
+차량 트래픽이 같이 흐르는 버스에서 XCP 세션만 보고 싶을 때 쓰는 `Profile` 메뉴 항목입니다.
+req/rsp(설정 시 broadcast) ID의 프레임만 Trace/Fixed 뷰에 표시합니다.
 
 - **캡처는 계속 됩니다** — 표시만 걸러내므로 나머지 트래픽도 링버퍼와 TCP API에는 그대로 있고,
   `recent`/`waitfor`/파이썬 백엔드는 영향받지 않습니다.

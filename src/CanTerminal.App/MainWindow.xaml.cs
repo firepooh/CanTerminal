@@ -1,9 +1,11 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.IO;
+using System.Reflection;
 using System.Text;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using System.Windows.Threading;
 using CanTerminal.Core;
 using CanTerminal.Core.IcsNeo;
@@ -14,6 +16,8 @@ namespace CanTerminal.App;
 
 public partial class MainWindow : Window
 {
+    private const string RepoUrl = "https://github.com/firepooh/CanTerminal";
+
     /// <summary>
     /// How long one flush may hold the UI thread. A count-based budget cannot bound this: the
     /// cost of a frame depends on how many panes take it and how many rows already exist, so a
@@ -28,16 +32,35 @@ public partial class MainWindow : Window
     /// </summary>
     private const int DisplayBacklogCap = 150_000;
 
+    private static readonly int[] Bitrates = [125_000, 250_000, 500_000, 1_000_000];
+    private static readonly int[] FdBitrates = [2_000_000, 5_000_000, 8_000_000];
+
     private readonly MessageHub _hub = new();
     private readonly DbcDecoder _dbc = new();
     private readonly FrameAnnotator _annotator;
     private readonly TcpApiServer _server;
+    private readonly AppSettings _settings = AppSettings.Load();
     private ICanAdapter? _adapter;
 
     private readonly ConcurrentQueue<CanFrame> _pending = new();
 
     /// <summary>One XCP session per channel; a 2-port master uses a different ID pair on each.</summary>
     private readonly Dictionary<string, XcpConfig> _xcpSessions = new(StringComparer.OrdinalIgnoreCase);
+
+    // Settings that used to live in a toolbar control and now live in the menu. The menu items
+    // themselves hold every boolean (checkable items are the state); only the values that need a
+    // dialog are kept here.
+    private List<DeviceItem> _devices = [];
+    private DeviceItem? _device;
+    private string _channelsText = "CAN1,CAN2";
+    private int _bitrate = 500_000;
+    private int _fdBitrate = 2_000_000;
+    private int _historyCapacity = TraceBuffer.DefaultCapacity;
+    private int _cycleMs = 100;
+    private int _apiPort = 29536;
+    private int _layout;                // 0 single, 1 split ↔, 2 split ↕
+    private string? _txChannel;
+    private string? _xcpChannel;        // channel the XCP dialog opens on
 
     private readonly DispatcherTimer _flushTimer;
     private readonly DispatcherTimer _statusTimer;
@@ -77,6 +100,13 @@ public partial class MainWindow : Window
         PaneA.SelectionChanged += UpdateStatusBar;
         PaneB.SelectionChanged += UpdateStatusBar;
 
+        // 20 Hz, chosen with its cost known. Every tick that publishes rows repaints the whole
+        // trace list, and on a maximised 4K window that is the app's dominant cost — GPU and
+        // compositor work rather than CPU, which is why it drags the whole desktop and not just
+        // this window. Measured on a live 2-channel bus at ~1,080 frames/s:
+        // 20 Hz = 34% GPU / 8% DWM, 10 Hz = 13% / 3%, 5 Hz = 9% / 5%; paused = 4%.
+        // 20 Hz costs about 2.6x what 10 Hz does and buys a visibly smoother scroll. This is
+        // the single number to lower on a weak GPU or a large multi-monitor desktop.
         _flushTimer = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromMilliseconds(50) };
         _flushTimer.Tick += (_, _) => FlushPending();
         _flushTimer.Start();
@@ -90,7 +120,11 @@ public partial class MainWindow : Window
 
         ApplyLayout();
         RefreshDevices();
-        ApplyServerCheck();
+        ApplyServerSetting();
+        UpdateConnStatus();
+        UpdateMenuState();
+        UpdateSummary();
+        UpdatePeriodicButton();
     }
 
     /// <summary>Panes that currently receive frames. A hidden pane is not fed, so it costs nothing.</summary>
@@ -102,6 +136,148 @@ public partial class MainWindow : Window
             if (PaneB.Visibility == Visibility.Visible) yield return PaneB;
         }
     }
+
+    // ---------- menu plumbing ----------
+
+    /// <summary>
+    /// Rebuilds a submenu as a radio group. Submenus are filled on open rather than kept in sync,
+    /// so a list that changes underneath (devices, open channels, configured sessions) can never
+    /// show a stale entry.
+    /// </summary>
+    private static void FillRadioMenu<T>(MenuItem parent, IReadOnlyList<T> items, Func<T, string> label,
+                                         Func<T, bool> isSelected, Action<T> pick)
+    {
+        parent.Items.Clear();
+        if (items.Count == 0)
+        {
+            parent.Items.Add(new MenuItem { Header = "(none)", IsEnabled = false });
+            return;
+        }
+        foreach (var item in items)
+        {
+            var captured = item;
+            var entry = new MenuItem
+            {
+                Header = Escape(label(item)),
+                IsCheckable = true,
+                IsChecked = isSelected(item),
+            };
+            entry.Click += (_, _) => pick(captured);
+            parent.Items.Add(entry);
+        }
+    }
+
+    /// <summary>An underscore in a device name or file path is not an access key.</summary>
+    private static string Escape(string header) => header.Replace("_", "__");
+
+    private void DeviceMenu_Opened(object sender, RoutedEventArgs e) =>
+        FillRadioMenu(MenuDevice, _devices, d => d.Label, d => ReferenceEquals(d, _device), d =>
+        {
+            _device = d;
+            UpdateConnStatus();
+        });
+
+    private void BitrateMenu_Opened(object sender, RoutedEventArgs e) =>
+        FillRadioMenu(MenuBitrate, Bitrates, b => $"{b:N0} bit/s", b => b == _bitrate, b =>
+        {
+            _bitrate = b;
+            UpdateSummary();
+        });
+
+    private void FdBitrateMenu_Opened(object sender, RoutedEventArgs e) =>
+        FillRadioMenu(MenuFdBitrate, FdBitrates, b => $"{b:N0} bit/s", b => b == _fdBitrate, b =>
+        {
+            _fdBitrate = b;
+            UpdateSummary();
+        });
+
+    private void FdEnabled_Click(object sender, RoutedEventArgs e) => UpdateSummary();
+
+    private void TxChannelMenu_Opened(object sender, RoutedEventArgs e) =>
+        FillRadioMenu(MenuTxChannel, _adapter?.Channels ?? [], c => c,
+                      c => string.Equals(c, _txChannel, StringComparison.OrdinalIgnoreCase), c =>
+                      {
+                          _txChannel = c;
+                          TxChannelText.Text = c;
+                      });
+
+    private void PaneAMenu_Opened(object sender, RoutedEventArgs e) => FillPaneMenu(MenuPaneA, PaneA);
+    private void PaneBMenu_Opened(object sender, RoutedEventArgs e) => FillPaneMenu(MenuPaneB, PaneB);
+
+    private static void FillPaneMenu(MenuItem parent, ChannelPane pane)
+    {
+        FillRadioMenu(parent, pane.ChannelItems, c => c,
+                      c => string.Equals(c, pane.SelectedChannel, StringComparison.OrdinalIgnoreCase),
+                      pane.SelectChannel);
+        parent.Items.Add(new Separator());
+        foreach (var (label, trace) in new[] { ("_Trace", true), ("_Fixed", false) })
+        {
+            bool captured = trace;
+            var entry = new MenuItem { Header = label, IsCheckable = true, IsChecked = pane.ShowsTrace == trace };
+            entry.Click += (_, _) => pane.SetTraceView(captured);
+            parent.Items.Add(entry);
+        }
+    }
+
+    private void RecentDbcMenu_Opened(object sender, RoutedEventArgs e)
+    {
+        MenuRecentDbc.Items.Clear();
+        if (_settings.RecentDbc.Count == 0)
+        {
+            MenuRecentDbc.Items.Add(new MenuItem { Header = "(none)", IsEnabled = false });
+            return;
+        }
+        for (int i = 0; i < _settings.RecentDbc.Count; i++)
+        {
+            string path = _settings.RecentDbc[i];
+            var entry = new MenuItem
+            {
+                Header = $"_{i + 1} {Escape(Path.GetFileName(path))}",
+                ToolTip = path,
+                IsChecked = string.Equals(path, _dbc.FilePath, StringComparison.OrdinalIgnoreCase),
+                IsCheckable = true,
+            };
+            entry.Click += (_, _) => LoadDbc(path);
+            MenuRecentDbc.Items.Add(entry);
+        }
+    }
+
+    /// <summary>Enabled state and radio marks for everything the menu owns.</summary>
+    private void UpdateMenuState()
+    {
+        bool connected = _adapter != null;
+        MenuTransmit.IsEnabled = connected;
+        PeriodicButton.IsEnabled = connected;   // Send is driven by the command's CanExecute
+        MenuDevice.IsEnabled = MenuBitrate.IsEnabled = MenuFd.IsEnabled = !connected;
+        MenuUnloadDbc.IsEnabled = _dbc.IsLoaded;
+        MenuPaneB.IsEnabled = _layout != 0;
+
+        bool xcp = IsXcpSelected;
+        MenuXcpSet.IsEnabled = MenuXcpRemove.IsEnabled = MenuXcpDetect.IsEnabled =
+            MenuXcpA2l.IsEnabled = MenuXcpOnly.IsEnabled = xcp;
+
+        MenuLayoutSingle.IsChecked = _layout == 0;
+        MenuLayoutSplitH.IsChecked = _layout == 1;
+        MenuLayoutSplitV.IsChecked = _layout == 2;
+
+        CommandManager.InvalidateRequerySuggested();
+    }
+
+    /// <summary>
+    /// The line that keeps the hidden settings visible. A setting moved into a menu that shows
+    /// nowhere else is a setting nobody can check against the device in front of them.
+    /// </summary>
+    private void UpdateSummary()
+    {
+        string channels = string.IsNullOrWhiteSpace(_channelsText) ? "CAN1" : _channelsText;
+        string speed = FormatBitrate(_bitrate) +
+                       (MenuFdEnabled.IsChecked ? $" + FD {FormatBitrate(_fdBitrate)}" : "");
+        string dbc = _dbc.IsLoaded ? Path.GetFileName(_dbc.FilePath!) : "no DBC";
+        SummaryText.Text = $"{channels} · {speed} · {dbc} · Profile: {(IsXcpSelected ? "XCP" : "None")}";
+    }
+
+    private static string FormatBitrate(int bps) =>
+        bps % 1_000_000 == 0 ? $"{bps / 1_000_000}M" : $"{bps / 1000}k";
 
     // ---------- devices / connection ----------
 
@@ -126,53 +302,59 @@ public partial class MainWindow : Window
         {
             InfoText.Text = $"Device scan failed: {ex.Message}";
         }
-        DeviceCombo.ItemsSource = items;
-        DeviceCombo.SelectedIndex = items.Count > 1 ? 1 : 0;
+        _devices = items;
+
+        // Keep the current pick across a rescan; otherwise prefer real hardware over the virtual bus.
+        string? previous = _device?.Label;
+        _device = items.FirstOrDefault(d => d.Label == previous) ?? (items.Count > 1 ? items[1] : items[0]);
+        UpdateConnStatus();
     }
 
-    private void RefreshButton_Click(object sender, RoutedEventArgs e) => RefreshDevices();
+    private void UpdateConnStatus()
+    {
+        if (_adapter is null)
+            ConnStatusText.Text = _device is null ? "Disconnected" : $"Disconnected — {_device.Label}";
+    }
 
     private void ConnectButton_Click(object sender, RoutedEventArgs e)
     {
-        if (_adapter != null)
-        {
-            Disconnect();
-            return;
-        }
+        if (_adapter != null) Disconnect();
+        else Connect();
+    }
 
-        if (DeviceCombo.SelectedItem is not DeviceItem item) return;
+    private void Connect()
+    {
+        if (_adapter != null || _device is null) return;
         try
         {
-            int bitrate = int.Parse(GetComboText(BitrateCombo));
-            int fdBitrate = int.Parse(GetComboText(FdBitrateCombo));
-            bool fd = FdCheck.IsChecked == true;
-            var channels = ParseChannels(ChannelsBox.Text, bitrate, fd, fdBitrate);
-            if (channels.Count == 0) channels.Add(new CanChannelConfig("CAN1", bitrate, fd, fdBitrate));
+            bool fd = MenuFdEnabled.IsChecked;
+            var channels = ParseChannels(_channelsText, _bitrate, fd, _fdBitrate);
+            if (channels.Count == 0) channels.Add(new CanChannelConfig("CAN1", _bitrate, fd, _fdBitrate));
 
-            ICanAdapter adapter = item.Ics is null ? new VirtualAdapter() : new IcsNeoAdapter(item.Ics);
+            ICanAdapter adapter = _device.Ics is null ? new VirtualAdapter() : new IcsNeoAdapter(_device.Ics);
             adapter.FrameReceived += _hub.Publish;
             adapter.ErrorOccurred += msg => Dispatcher.BeginInvoke(() => InfoText.Text = msg);
             adapter.Open(channels);
             _adapter = adapter;
 
-            TxChannelCombo.ItemsSource = adapter.Channels;
-            TxChannelCombo.SelectedIndex = 0;
+            _txChannel = adapter.Channels.FirstOrDefault();
+            TxChannelText.Text = _txChannel ?? "—";
             ConnectButton.Content = "Disconnect";
             ConnStatusText.Text = $"Connected: {adapter.Name} [" +
                 string.Join(", ", channels.Select(c => $"{c.Name.ToUpperInvariant()}@{c.Bitrate}")) +
                 $"]{(fd ? " FD" : "")}";
-            DeviceCombo.IsEnabled = RefreshButton.IsEnabled = false;
             OnChannelsOpened(adapter.Channels);
         }
         catch (Exception ex)
         {
             MessageBox.Show(this, ex.Message, "Connect failed", MessageBoxButton.OK, MessageBoxImage.Error);
         }
+        UpdateMenuState();
     }
 
     /// <summary>
     /// Parses the Channels box. An entry is "NAME", "NAME@bitrate" or "NAME@bitrate:fdbitrate";
-    /// whatever is omitted falls back to the toolbar values, so a plain "CAN1,CAN2" behaves as
+    /// whatever is omitted falls back to the Bus menu values, so a plain "CAN1,CAN2" behaves as
     /// before. Per-channel speeds matter as soon as the two ports are not the same bus
     /// (e.g. 500k powertrain on CAN1, 125k body on CAN2).
     /// </summary>
@@ -208,10 +390,8 @@ public partial class MainWindow : Window
         PaneA.SetChannels(channels);                                    // stays on "All" — merged timeline
         PaneB.SetChannels(channels, prefer: channels.Count > 1 ? channels[1] : null);
 
-        string previous = XcpChannelCombo.SelectedItem as string ?? "";
-        XcpChannelCombo.ItemsSource = channels;
-        int index = channels.ToList().FindIndex(c => c.Equals(previous, StringComparison.OrdinalIgnoreCase));
-        XcpChannelCombo.SelectedIndex = index >= 0 ? index : (channels.Count > 0 ? 0 : -1);
+        if (_xcpChannel is null || !channels.Contains(_xcpChannel, StringComparer.OrdinalIgnoreCase))
+            _xcpChannel = channels.FirstOrDefault();
     }
 
     private void Disconnect()
@@ -219,23 +399,24 @@ public partial class MainWindow : Window
         StopPeriodic();
         try { _adapter?.Dispose(); } catch { }
         _adapter = null;
+        _txChannel = null;
+        TxChannelText.Text = "—";       // no channel is open, so naming one would be a lie
         ConnectButton.Content = "Connect";
-        ConnStatusText.Text = "Disconnected";
-        DeviceCombo.IsEnabled = RefreshButton.IsEnabled = true;
+        UpdateConnStatus();
+        UpdateMenuState();
     }
 
     // ---------- frame flow ----------
 
     private void FlushPending()
     {
-        bool paused = PauseCheck.IsChecked == true;
-        bool highlight = HighlightCheck.IsChecked == true;
-        bool autoScroll = AutoScrollCheck.IsChecked == true;
+        bool paused = PauseButton.IsChecked == true;
+        bool highlight = MenuHighlight.IsChecked;
         double now = _uiClock.Elapsed.TotalSeconds;
 
         // Null unless the XCP-only filter is armed *and* at least one session is configured —
         // a half-configured profile must not blank the whole view.
-        var xcpFilter = IsXcpSelected && XcpOnlyCheck.IsChecked == true && _annotator.XcpSessions.Count > 0
+        var xcpFilter = IsXcpSelected && MenuXcpOnly.IsChecked && _annotator.XcpSessions.Count > 0
             ? _annotator
             : null;
 
@@ -272,7 +453,7 @@ public partial class MainWindow : Window
                 if (pane.FixedVisible) pane.TickFade(now);
 
         if (added == 0) return;
-        foreach (var pane in panes) pane.AfterAppend(autoScroll);
+        foreach (var pane in panes) pane.AfterAppend();
     }
 
     /// <summary>
@@ -323,13 +504,18 @@ public partial class MainWindow : Window
             ? $"API server: 127.0.0.1:{_server.Port} ({_server.ClientCount} clients)"
             : "API server: off";
 
+        // "paused" is worth saying on the pane itself: it is both why the rows stopped moving and
+        // the reason scrolling back works at all.
+        string state = PauseButton.IsChecked == true ? " — paused, scroll to browse" : "";
         foreach (var pane in ActivePanes)
-            pane.UpdateStats($"{pane.TraceCount:N0} rows" + (pane.IsScrolledBack ? " — view held" : ""));
+            pane.UpdateStats($"{pane.TraceCount:N0} rows{state}");
     }
 
     // ---------- TX ----------
 
-    private void SendButton_Click(object sender, RoutedEventArgs e) => DoSend(silent: false);
+    private void CanTransmit(object sender, CanExecuteRoutedEventArgs e) => e.CanExecute = _adapter != null;
+
+    private void SendFrame_Executed(object sender, ExecutedRoutedEventArgs e) => DoSend(silent: false);
 
     private void DoSend(bool silent)
     {
@@ -340,9 +526,9 @@ public partial class MainWindow : Window
             if (idText.StartsWith("0x", StringComparison.OrdinalIgnoreCase)) idText = idText[2..];
             uint id = uint.Parse(idText, System.Globalization.NumberStyles.HexNumber);
             byte[] data = Convert.FromHexString(TxDataBox.Text.Replace(" ", "").Replace("-", ""));
-            string channel = TxChannelCombo.SelectedItem as string ?? "CAN1";
-            bool ext = TxExtCheck.IsChecked == true || id > 0x7FF;
-            a.Send(channel, id, data, ext, TxFdCheck.IsChecked == true, TxBrsCheck.IsChecked == true, "ui");
+            string channel = _txChannel ?? a.Channels.FirstOrDefault() ?? "CAN1";
+            bool ext = MenuTxExt.IsChecked || id > 0x7FF;
+            a.Send(channel, id, data, ext, MenuTxFd.IsChecked, MenuTxBrs.IsChecked, "ui");
         }
         catch (Exception ex)
         {
@@ -354,30 +540,53 @@ public partial class MainWindow : Window
 
     private void PeriodicButton_Click(object sender, RoutedEventArgs e)
     {
-        if (_periodicTimer.IsEnabled)
-        {
-            StopPeriodic();
-            return;
-        }
-        if (!int.TryParse(TxCycleBox.Text, out int ms) || ms < 1)
-        {
-            MessageBox.Show(this, "Invalid cycle time.", "Periodic TX", MessageBoxButton.OK, MessageBoxImage.Warning);
-            return;
-        }
-        _periodicTimer.Interval = TimeSpan.FromMilliseconds(ms);
+        if (_periodicTimer.IsEnabled) StopPeriodic();
+        else StartPeriodic();
+    }
+
+    private void StartCyclic_Executed(object sender, ExecutedRoutedEventArgs e) => StartPeriodic();
+    private void StopCyclic_Executed(object sender, ExecutedRoutedEventArgs e) => StopPeriodic();
+
+    private void StartPeriodic()
+    {
+        if (_periodicTimer.IsEnabled) return;
+        _periodicTimer.Interval = TimeSpan.FromMilliseconds(_cycleMs);
         _periodicTimer.Start();
-        PeriodicButton.Content = "Stop";
+        UpdatePeriodicButton();
     }
 
     private void StopPeriodic()
     {
         _periodicTimer.Stop();
-        PeriodicButton.Content = "Start";
+        UpdatePeriodicButton();
+    }
+
+    /// <summary>The cycle time lives in a dialog now, so the button label has to carry it.</summary>
+    private void UpdatePeriodicButton() =>
+        PeriodicButton.Content = $"{(_periodicTimer.IsEnabled ? "Stop" : "Start")} · {_cycleMs} ms";
+
+    private void CycleTime_Click(object sender, RoutedEventArgs e)
+    {
+        int? ms = InputDialog.AskInt(this, "Cycle time", "Cyclic TX period in milliseconds:",
+                                     _cycleMs, 1, 3_600_000);
+        if (ms is null) return;
+        _cycleMs = ms.Value;
+        if (_periodicTimer.IsEnabled) _periodicTimer.Interval = TimeSpan.FromMilliseconds(_cycleMs);
+        UpdatePeriodicButton();
     }
 
     // ---------- layout ----------
 
-    private void Layout_Changed(object sender, SelectionChangedEventArgs e) => ApplyLayout();
+    private void LayoutSingle_Executed(object sender, ExecutedRoutedEventArgs e) => SetLayout(0);
+    private void LayoutSplitH_Executed(object sender, ExecutedRoutedEventArgs e) => SetLayout(1);
+    private void LayoutSplitV_Executed(object sender, ExecutedRoutedEventArgs e) => SetLayout(2);
+
+    private void SetLayout(int layout)
+    {
+        _layout = layout;
+        ApplyLayout();
+        UpdateMenuState();
+    }
 
     private void ApplyLayout()
     {
@@ -391,7 +600,7 @@ public partial class MainWindow : Window
             Grid.SetColumn(el, 0);
         }
 
-        if (LayoutCombo.SelectedIndex == 0)
+        if (_layout == 0)
         {
             PaneSplitter.Visibility = Visibility.Collapsed;
             PaneB.Visibility = Visibility.Collapsed;
@@ -403,7 +612,7 @@ public partial class MainWindow : Window
         PaneSplitter.Visibility = Visibility.Visible;
         PaneB.Visibility = Visibility.Visible;
 
-        if (LayoutCombo.SelectedIndex == 1)   // side by side
+        if (_layout == 1)   // side by side
         {
             PaneHost.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             PaneHost.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(5) });
@@ -412,7 +621,7 @@ public partial class MainWindow : Window
             Grid.SetColumn(PaneSplitter, 1);
             Grid.SetColumn(PaneB, 2);
             PaneSplitter.ResizeDirection = GridResizeDirection.Columns;
-            PaneSplitter.Cursor = System.Windows.Input.Cursors.SizeWE;
+            PaneSplitter.Cursor = Cursors.SizeWE;
         }
         else                                   // stacked
         {
@@ -423,21 +632,26 @@ public partial class MainWindow : Window
             Grid.SetRow(PaneSplitter, 1);
             Grid.SetRow(PaneB, 2);
             PaneSplitter.ResizeDirection = GridResizeDirection.Rows;
-            PaneSplitter.Cursor = System.Windows.Input.Cursors.SizeNS;
+            PaneSplitter.Cursor = Cursors.SizeNS;
         }
         UpdateStatusBar();
     }
 
     // ---------- protocol profile (XCP) ----------
 
-    private bool IsXcpSelected => ProfileCombo.SelectedIndex == 1;
+    private bool IsXcpSelected => MenuProfileXcp.IsChecked;
 
-    private void Profile_Changed(object sender, SelectionChangedEventArgs e)
+    private void ProfileNone_Click(object sender, RoutedEventArgs e) => SetProfile(false);
+    private void ProfileXcp_Click(object sender, RoutedEventArgs e) => SetProfile(true);
+
+    private void SetProfile(bool xcp)
     {
-        if (XcpPanel is null) return; // fires during InitializeComponent
-        XcpPanel.Visibility = IsXcpSelected ? Visibility.Visible : Visibility.Collapsed;
-        if (!IsXcpSelected) _xcpSessions.Clear();
+        MenuProfileNone.IsChecked = !xcp;
+        MenuProfileXcp.IsChecked = xcp;
+        if (!xcp) _xcpSessions.Clear();
         RebuildXcpSessions();
+        UpdateMenuState();
+        UpdateSummary();
     }
 
     /// <summary>
@@ -451,51 +665,38 @@ public partial class MainWindow : Window
         foreach (var pane in ActivePanes) pane.ResetFixed();
 
         XcpStatusText.Text = _xcpSessions.Count == 0
-            ? IsXcpSelected ? "no session configured yet" : ""
-            : string.Join("    ", _xcpSessions
+            ? IsXcpSelected ? "XCP: no session configured" : ""
+            : "XCP  " + string.Join("    ", _xcpSessions
                 .OrderBy(kv => ChannelPalette.Index(kv.Key))
                 .Select(kv => $"{kv.Key} 0x{kv.Value.RequestId:X}/0x{kv.Value.ResponseId:X}"));
     }
 
-    private void XcpChannel_Changed(object sender, SelectionChangedEventArgs e)
+    private void XcpSet_Click(object sender, RoutedEventArgs e)
     {
-        if (XcpReqBox is null) return; // fires during InitializeComponent
-        // Show what is currently configured for the newly selected channel.
-        if (XcpChannelCombo.SelectedItem is string channel && _xcpSessions.TryGetValue(channel, out var cfg))
-        {
-            XcpReqBox.Text = cfg.RequestId.ToString("X");
-            XcpRspBox.Text = cfg.ResponseId.ToString("X");
-        }
-    }
+        var existing = _xcpSessions.ToDictionary(kv => kv.Key, kv => (kv.Value.RequestId, kv.Value.ResponseId),
+                                                 StringComparer.OrdinalIgnoreCase);
+        var result = XcpSessionDialog.Ask(this, AvailableXcpChannels(), _xcpChannel, existing);
+        if (result is null) return;
 
-    private void XcpApply_Click(object sender, RoutedEventArgs e)
-    {
-        try
-        {
-            string channel = SelectedXcpChannel();
-            uint req = ParseHexId(XcpReqBox.Text);
-            uint rsp = ParseHexId(XcpRspBox.Text);
-            if (req == rsp) throw new InvalidOperationException("Request and response IDs must differ.");
-            _xcpSessions[channel] = new XcpConfig(req, rsp, Channel: channel);
-            RebuildXcpSessions();
-            InfoText.Text = $"XCP on {channel}: req 0x{req:X} / rsp 0x{rsp:X} — frames from here on are decoded.";
-        }
-        catch (Exception ex)
-        {
-            MessageBox.Show(this, ex.Message, "XCP profile", MessageBoxButton.OK, MessageBoxImage.Warning);
-        }
-    }
-
-    private void XcpRemove_Click(object sender, RoutedEventArgs e)
-    {
-        string channel = SelectedXcpChannel();
-        if (!_xcpSessions.Remove(channel))
-        {
-            InfoText.Text = $"No XCP session configured on {channel}.";
-            return;
-        }
+        _xcpChannel = result.Channel;
+        _xcpSessions[result.Channel] = new XcpConfig(result.RequestId, result.ResponseId, Channel: result.Channel);
         RebuildXcpSessions();
-        InfoText.Text = $"Removed the XCP session on {channel}.";
+        InfoText.Text = $"XCP on {result.Channel}: req 0x{result.RequestId:X} / rsp 0x{result.ResponseId:X} — " +
+                        "frames from here on are decoded.";
+    }
+
+    private void XcpRemoveMenu_Opened(object sender, RoutedEventArgs e)
+    {
+        var configured = _xcpSessions.Keys.OrderBy(ChannelPalette.Index).ToList();
+        FillRadioMenu(MenuXcpRemove, configured,
+                      c => $"{c}  0x{_xcpSessions[c].RequestId:X}/0x{_xcpSessions[c].ResponseId:X}",
+                      _ => false,
+                      c =>
+                      {
+                          _xcpSessions.Remove(c);
+                          RebuildXcpSessions();
+                          InfoText.Text = $"Removed the XCP session on {c}.";
+                      });
     }
 
     private void XcpDetect_Click(object sender, RoutedEventArgs e)
@@ -521,7 +722,7 @@ public partial class MainWindow : Window
         foreach (var c in best)
             _xcpSessions[c.Channel] = new XcpConfig(c.RequestId, c.ResponseId, Channel: c.Channel);
         RebuildXcpSessions();
-        SelectXcpChannel(best[0].Channel);
+        _xcpChannel = best[0].Channel;
 
         string applied = string.Join("\n", best.Select(c => $"  {c}"));
         int others = candidates.Count - best.Count;
@@ -573,7 +774,7 @@ public partial class MainWindow : Window
                           (r.Extended ? "  (29-bit)" : ""));
             }
             RebuildXcpSessions();
-            SelectXcpChannel(targets[0]);
+            _xcpChannel = targets[0];
 
             string skipped = found.Count > targets.Count
                 ? $"\n\n{found.Count - targets.Count} file(s) had no channel to go to — only {targets.Count} channel(s) are open."
@@ -588,29 +789,10 @@ public partial class MainWindow : Window
         }
     }
 
-    private List<string> AvailableXcpChannels() =>
-        _adapter?.Channels.ToList() ?? (XcpChannelCombo.ItemsSource as IEnumerable<string>)?.ToList() ?? ["CAN1"];
+    private List<string> AvailableXcpChannels() => _adapter?.Channels.ToList() ?? ["CAN1"];
 
     private string SelectedXcpChannel() =>
-        XcpChannelCombo.SelectedItem as string ?? AvailableXcpChannels().FirstOrDefault() ?? "CAN1";
-
-    private void SelectXcpChannel(string channel)
-    {
-        if (XcpChannelCombo.ItemsSource is not IEnumerable<string> items) return;
-        int index = items.ToList().FindIndex(c => c.Equals(channel, StringComparison.OrdinalIgnoreCase));
-        if (index >= 0) XcpChannelCombo.SelectedIndex = index;
-    }
-
-    private static uint ParseHexId(string text)
-    {
-        string s = text.Trim();
-        if (s.StartsWith("0x", StringComparison.OrdinalIgnoreCase)) s = s[2..];
-        if (!uint.TryParse(s, System.Globalization.NumberStyles.HexNumber, null, out uint id))
-            throw new InvalidOperationException($"'{text}' is not a hex CAN ID.");
-        return id;
-    }
-
-    // ---------- view / DBC / server / misc ----------
+        _xcpChannel ?? AvailableXcpChannels().FirstOrDefault() ?? "CAN1";
 
     private void XcpOnly_Changed(object sender, RoutedEventArgs e)
     {
@@ -618,79 +800,101 @@ public partial class MainWindow : Window
         // The aggregate would otherwise keep rows collected under the previous filter, which
         // stop updating and read as live traffic.
         foreach (var pane in ActivePanes) pane.ResetFixed();
-        InfoText.Text = XcpOnlyCheck.IsChecked == true
+        InfoText.Text = MenuXcpOnly.IsChecked
             ? "Showing XCP IDs only — other traffic is still captured, just not displayed."
             : "Showing all CAN IDs.";
     }
 
-    private void History_Changed(object sender, RoutedEventArgs e)
+    // ---------- view ----------
+
+    private void JumpToLive_Executed(object sender, ExecutedRoutedEventArgs e)
     {
-        if (PaneA is null) return; // fires during InitializeComponent
-        if (!int.TryParse(HistoryBox.Text, out int capacity) || capacity < TraceBuffer.MinCapacity)
-        {
-            HistoryBox.Text = TraceBuffer.DefaultCapacity.ToString();
-            capacity = TraceBuffer.DefaultCapacity;
-            InfoText.Text = $"History must be at least {TraceBuffer.MinCapacity} rows — reset to {capacity:N0}.";
-        }
-        PaneA.SetHistoryCapacity(capacity);
-        PaneB.SetHistoryCapacity(capacity);
+        foreach (var pane in ActivePanes) pane.JumpToLive();
     }
 
-    private void HighlightCheck_Changed(object sender, RoutedEventArgs e)
+    private void TogglePause_Executed(object sender, ExecutedRoutedEventArgs e) =>
+        PauseButton.IsChecked = PauseButton.IsChecked != true;
+
+    // Two views of one state. Assigning a value a control already holds raises nothing, so the
+    // pair settles after one hop rather than bouncing.
+    private void PauseButton_Changed(object sender, RoutedEventArgs e)
+    {
+        MenuPause.IsChecked = PauseButton.IsChecked == true;
+        // Resuming means the view follows the tail again, so put it there rather than leaving it
+        // parked wherever the user stopped reading.
+        if (PauseButton.IsChecked != true)
+            foreach (var pane in ActivePanes) pane.JumpToLive();
+        UpdateStatusBar();
+    }
+
+    private void MenuPause_Changed(object sender, RoutedEventArgs e) =>
+        PauseButton.IsChecked = MenuPause.IsChecked;
+
+    private void HistorySize_Click(object sender, RoutedEventArgs e)
+    {
+        int? capacity = InputDialog.AskInt(this, "History size", "Trace rows kept per pane:",
+                                           _historyCapacity, TraceBuffer.MinCapacity, 5_000_000,
+                                           "Once full, the oldest row is overwritten in place.");
+        if (capacity is null) return;
+        _historyCapacity = capacity.Value;
+        PaneA.SetHistoryCapacity(_historyCapacity);
+        PaneB.SetHistoryCapacity(_historyCapacity);
+        InfoText.Text = $"History set to {_historyCapacity:N0} rows per pane.";
+    }
+
+    private void Highlight_Changed(object sender, RoutedEventArgs e)
     {
         // Leaving stale highlights frozen on screen would misreport them as recent changes.
         foreach (var pane in ActivePanes) pane.ClearHighlights();
     }
 
-    private void DbcButton_Click(object sender, RoutedEventArgs e)
+    private void ClearAll_Executed(object sender, ExecutedRoutedEventArgs e)
     {
-        var dlg = new OpenFileDialog { Filter = "DBC files (*.dbc)|*.dbc|All files|*.*" };
-        if (dlg.ShowDialog(this) != true) return;
-        try
-        {
-            _dbc.Load(dlg.FileName);
-            DbcLabel.Text = Path.GetFileName(dlg.FileName);
-        }
-        catch (Exception ex)
-        {
-            MessageBox.Show(this, ex.Message, "DBC load failed", MessageBoxButton.OK, MessageBoxImage.Error);
-        }
-    }
+        if (MessageBox.Show(this,
+                "Clear both panes and the capture buffer?\n\nEverything captured so far is discarded — " +
+                "recent() and the TCP API will no longer see it.",
+                "Clear all", MessageBoxButton.OKCancel, MessageBoxImage.Warning) != MessageBoxResult.OK)
+            return;
 
-    private void ServerCheck_Changed(object sender, RoutedEventArgs e) => ApplyServerCheck();
-
-    private void ApplyServerCheck()
-    {
-        if (_server is null) return; // fires during InitializeComponent
-        try
-        {
-            if (ServerCheck.IsChecked == true)
-            {
-                if (!_server.IsRunning)
-                    _server.Start(int.TryParse(PortBox.Text, out int p) ? p : 29536);
-            }
-            else
-            {
-                _server.Stop();
-            }
-        }
-        catch (Exception ex)
-        {
-            MessageBox.Show(this, ex.Message, "API server", MessageBoxButton.OK, MessageBoxImage.Error);
-            ServerCheck.IsChecked = false;
-        }
-        UpdateStatusBar();
-    }
-
-    private void ClearButton_Click(object sender, RoutedEventArgs e)
-    {
         PaneA.ClearAll();
         PaneB.ClearAll();
         _hub.Clear();
         _displaySkipped = 0;
     }
 
-    private void SaveButton_Click(object sender, RoutedEventArgs e)
+    // ---------- file / DBC ----------
+
+    private void LoadDbc_Executed(object sender, ExecutedRoutedEventArgs e)
+    {
+        var dlg = new OpenFileDialog { Filter = "DBC files (*.dbc)|*.dbc|All files|*.*" };
+        if (dlg.ShowDialog(this) == true) LoadDbc(dlg.FileName);
+    }
+
+    private void LoadDbc(string path)
+    {
+        try
+        {
+            _dbc.Load(path);
+            _settings.PushRecentDbc(path);
+            InfoText.Text = $"DBC loaded: {path}";
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, ex.Message, "DBC load failed", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        UpdateMenuState();
+        UpdateSummary();
+    }
+
+    private void UnloadDbc_Click(object sender, RoutedEventArgs e)
+    {
+        _dbc.Unload();
+        InfoText.Text = "DBC unloaded — frames captured from here on carry no signal comments.";
+        UpdateMenuState();
+        UpdateSummary();
+    }
+
+    private void SaveCsv_Executed(object sender, ExecutedRoutedEventArgs e)
     {
         var dlg = new SaveFileDialog
         {
@@ -722,8 +926,157 @@ public partial class MainWindow : Window
         }
     }
 
-    private static string GetComboText(ComboBox combo) =>
-        (combo.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? combo.Text;
+    private void Exit_Click(object sender, RoutedEventArgs e) => Close();
+
+    // ---------- bus commands ----------
+
+    private void CanEditBusSettings(object sender, CanExecuteRoutedEventArgs e) => e.CanExecute = _adapter is null;
+    private void CanConnect(object sender, CanExecuteRoutedEventArgs e) => e.CanExecute = _adapter is null;
+    private void CanDisconnect(object sender, CanExecuteRoutedEventArgs e) => e.CanExecute = _adapter != null;
+
+    private void RefreshDevices_Executed(object sender, ExecutedRoutedEventArgs e) => RefreshDevices();
+    private void Connect_Executed(object sender, ExecutedRoutedEventArgs e) => Connect();
+    private void Disconnect_Executed(object sender, ExecutedRoutedEventArgs e) => Disconnect();
+
+    private void EditChannels_Executed(object sender, ExecutedRoutedEventArgs e)
+    {
+        string? entered = InputDialog.Ask(this, "Channels", "Channels to open:", _channelsText,
+            "Comma separated: CAN1,CAN2,CAN3,CAN4,MSCAN,SWCAN\n" +
+            "Per-channel speed: NAME@bitrate[:fdbitrate], e.g. CAN1@500000,CAN2@125000\n" +
+            "Without @ the Bus ▸ Bitrate value is used.");
+        if (entered is null) return;
+        try
+        {
+            // Validate here rather than at connect time, so a typo is reported where it was made.
+            ParseChannels(entered, _bitrate, MenuFdEnabled.IsChecked, _fdBitrate);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, ex.Message, "Channels", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+        _channelsText = entered;
+        UpdateSummary();
+    }
+
+    // ---------- tools ----------
+
+    private void ApiServer_Changed(object sender, RoutedEventArgs e) => ApplyServerSetting();
+
+    private void ApplyServerSetting()
+    {
+        if (_server is null) return; // fires during InitializeComponent
+        try
+        {
+            if (MenuApiServer.IsChecked)
+            {
+                if (!_server.IsRunning) _server.Start(_apiPort);
+            }
+            else
+            {
+                _server.Stop();
+            }
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, ex.Message, "API server", MessageBoxButton.OK, MessageBoxImage.Error);
+            MenuApiServer.IsChecked = false;
+        }
+        UpdateStatusBar();
+    }
+
+    private void ApiPort_Click(object sender, RoutedEventArgs e)
+    {
+        int? port = InputDialog.AskInt(this, "API server port", "TCP port for the local JSON API:",
+                                       _apiPort, 1, 65535, "The server always binds 127.0.0.1.");
+        if (port is null || port.Value == _apiPort) return;
+        _apiPort = port.Value;
+        if (_server.IsRunning)
+        {
+            _server.Stop();
+            ApplyServerSetting();
+        }
+        UpdateStatusBar();
+    }
+
+    private void CopySnippet_Click(object sender, RoutedEventArgs e)
+    {
+        string channel = _txChannel ?? _adapter?.Channels.FirstOrDefault() ?? "CAN1";
+        string idText = TxIdBox.Text.Trim();
+        if (idText.StartsWith("0x", StringComparison.OrdinalIgnoreCase)) idText = idText[2..];
+        string id = uint.TryParse(idText, System.Globalization.NumberStyles.HexNumber, null, out uint parsed)
+            ? $"0x{parsed:X}" : "0x123";
+        string data = TxDataBox.Text.Replace(" ", "").Replace("-", "");
+
+        string snippet = $"""
+            # CanTerminal local JSON API — add <repo>/python to sys.path or pip install it
+            from canterminal_can import CanTerminalClient
+
+            with CanTerminalClient(port={_apiPort}) as ct:
+                print(ct.status())
+                ct.send("{channel}", {id}, bytes.fromhex("{data}"))
+                for f in ct.recent(count=20, channel="{channel}"):
+                    print(f["ts"], f["idHex"], f["data"], f["type"] or "")
+            """;
+        try
+        {
+            Clipboard.SetText(snippet);
+            InfoText.Text = "Python snippet copied to the clipboard.";
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, ex.Message, "Copy snippet", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
+
+    // ---------- help ----------
+
+    private void Shortcuts_Executed(object sender, ExecutedRoutedEventArgs e) =>
+        MessageBox.Show(this, """
+            File
+              Ctrl+D          Load DBC…
+              Ctrl+S          Save trace as CSV…
+
+            Bus
+              F5              Refresh devices
+              Ctrl+Shift+C    Channels…
+              F9              Connect
+              Shift+F9        Disconnect
+
+            View
+              Ctrl+1 / 2 / 3  Single / Split ↔ / Split ↕
+              End             Jump to live
+              F7              Pause display
+              Ctrl+L          Clear all
+
+            Transmit
+              Ctrl+Enter      Send frame
+              F6              Start cyclic TX
+              Shift+F6        Stop cyclic TX
+
+            Help
+              Ctrl+/          This list
+            """, "Keyboard shortcuts", MessageBoxButton.OK, MessageBoxImage.Information);
+
+    private void Readme_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo(RepoUrl) { UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            InfoText.Text = $"Could not open the browser: {ex.Message}";
+        }
+    }
+
+    private void About_Click(object sender, RoutedEventArgs e)
+    {
+        string version = Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "dev";
+        MessageBox.Show(this,
+            $"CanTerminal {version}\nCAN monitor for Intrepid ValueCAN / neoVI.\n\n{RepoUrl}",
+            "About CanTerminal", MessageBoxButton.OK, MessageBoxImage.Information);
+    }
 
     private void Window_Closing(object sender, System.ComponentModel.CancelEventArgs e)
     {

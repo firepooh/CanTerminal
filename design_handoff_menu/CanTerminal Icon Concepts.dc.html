@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  body { margin:0; background:#0e1013; }
+  a { color:#e8b23a; } a:hover { color:#f5c85e; }
+</style>
+</helmet>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <linearGradient id="tileA" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2b3138"></stop><stop offset="1" stop-color="#171b20"></stop>
+    </linearGradient>
+    <linearGradient id="tileB" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1d2a33"></stop><stop offset="1" stop-color="#101820"></stop>
+    </linearGradient>
+    <linearGradient id="tileC" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#101317"></stop><stop offset="1" stop-color="#05070a"></stop>
+    </linearGradient>
+    <linearGradient id="tileD" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#e9eaec"></stop><stop offset="1" stop-color="#c9ccd1"></stop>
+    </linearGradient>
+
+    <symbol id="icoA" viewBox="0 0 256 256">
+      <rect x="8" y="8" width="240" height="240" rx="52" fill="url(#tileA)"></rect>
+      <rect x="8.5" y="8.5" width="239" height="239" rx="51.5" fill="none" stroke="#454d57" stroke-width="3"></rect>
+      <polyline points="34,164 68,164 68,96 102,96 102,164 154,164 154,96 188,96 188,164 222,164"
+        fill="none" stroke="#e8b23a" stroke-width="18" stroke-linejoin="round" stroke-linecap="round"></polyline>
+      <rect x="34" y="196" width="188" height="10" rx="5" fill="#5c6672"></rect>
+    </symbol>
+
+    <symbol id="icoB" viewBox="0 0 256 256">
+      <rect x="8" y="8" width="240" height="240" rx="52" fill="url(#tileB)"></rect>
+      <rect x="8.5" y="8.5" width="239" height="239" rx="51.5" fill="none" stroke="#2f4552" stroke-width="3"></rect>
+      <path d="M32 92 C 78 92, 78 164, 128 164 C 178 164, 178 92, 224 92"
+        fill="none" stroke="#4fc3a1" stroke-width="17" stroke-linecap="round"></path>
+      <path d="M32 164 C 78 164, 78 92, 128 92 C 178 92, 178 164, 224 164"
+        fill="none" stroke="#4a90d9" stroke-width="17" stroke-linecap="round"></path>
+      <circle cx="128" cy="128" r="15" fill="#0f1820" stroke="#8aa2b2" stroke-width="8"></circle>
+    </symbol>
+
+    <symbol id="icoC" viewBox="0 0 256 256">
+      <rect x="8" y="8" width="240" height="240" rx="52" fill="url(#tileC)"></rect>
+      <rect x="8.5" y="8.5" width="239" height="239" rx="51.5" fill="none" stroke="#2b3138" stroke-width="3"></rect>
+      <polyline points="58,84 106,128 58,172" fill="none" stroke="#5fd08a" stroke-width="20"
+        stroke-linecap="round" stroke-linejoin="round"></polyline>
+      <rect x="132" y="152" width="70" height="20" rx="6" fill="#5fd08a"></rect>
+      <rect x="132" y="84" width="70" height="14" rx="5" fill="#39505f"></rect>
+      <rect x="132" y="112" width="46" height="14" rx="5" fill="#39505f"></rect>
+    </symbol>
+
+    <symbol id="icoD" viewBox="0 0 256 256">
+      <rect x="8" y="8" width="240" height="240" rx="52" fill="url(#tileD)"></rect>
+      <rect x="8.5" y="8.5" width="239" height="239" rx="51.5" fill="none" stroke="#aeb3ba" stroke-width="3"></rect>
+      <rect x="40" y="52" width="176" height="26" rx="7" fill="#c8442f"></rect>
+      <rect x="40" y="94" width="42" height="26" rx="7" fill="#3b4450"></rect>
+      <rect x="93" y="94" width="42" height="26" rx="7" fill="#3b4450"></rect>
+      <rect x="146" y="94" width="70" height="26" rx="7" fill="#8b939d"></rect>
+      <rect x="40" y="136" width="70" height="26" rx="7" fill="#3b4450"></rect>
+      <rect x="121" y="136" width="95" height="26" rx="7" fill="#8b939d"></rect>
+      <rect x="40" y="178" width="176" height="26" rx="7" fill="#2f7d5b"></rect>
+    </symbol>
+  </defs>
+</svg>
+
+<section style="min-height:100vh;padding:56px 64px 96px;font-family:'IBM Plex Sans',system-ui,sans-serif;color:#e6e8ea;display:flex;flex-direction:column;gap:40px">
+
+  <header style="display:flex;flex-direction:column;gap:10px;max-width:760px">
+    <div style="font-family:'IBM Plex Mono',monospace;font-size:12px;letter-spacing:.16em;color:#8b939d;text-transform:uppercase">CanTerminal — ValueCAN Monitor · app icon</div>
+    <h1 style="margin:0;font-size:34px;font-weight:600;letter-spacing:-.02em">4 icon concepts</h1>
+    <p style="margin:0;font-size:15px;line-height:1.55;color:#9aa2ab;text-wrap:pretty">Windows 11 tile geometry (256px, 52px corner radius, 8px safe margin). Each shown at 256 / 64 / 32 / 16 px on light and dark shell backgrounds.</p>
+  </header>
+
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(400px,1fr));gap:28px">
+
+    <article id="1a" style="display:flex;flex-direction:column;gap:20px;padding:28px;background:#15181c;border:1px solid #262b31;border-radius:16px">
+      <div style="display:flex;align-items:baseline;gap:12px">
+        <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;padding:3px 8px;border-radius:5px;background:#e8b23a;color:#15181c;font-weight:500">1a</span>
+        <h2 style="margin:0;font-size:19px;font-weight:600">Bus waveform</h2>
+      </div>
+      <p style="margin:0;font-size:13.5px;line-height:1.5;color:#9aa2ab">Dominant/recessive square wave — the most literal read of "CAN traffic". Amber on graphite reads as an instrument, not a browser app.</p>
+      <div style="display:flex;align-items:flex-end;gap:24px;flex-wrap:wrap">
+        <svg width="160" height="160"><use href="#icoA"></use></svg>
+        <svg width="64" height="64"><use href="#icoA"></use></svg>
+        <svg width="32" height="32"><use href="#icoA"></use></svg>
+        <svg width="16" height="16"><use href="#icoA"></use></svg>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:#f3f4f6;border-radius:8px">
+          <svg width="20" height="20"><use href="#icoA"></use></svg>
+          <span style="font-size:12.5px;color:#20242a">Light taskbar</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:#202225;border-radius:8px">
+          <svg width="20" height="20"><use href="#icoA"></use></svg>
+          <span style="font-size:12.5px;color:#d6d9dd">Dark taskbar</span>
+        </div>
+      </div>
+    </article>
+
+    <article id="1b" style="display:flex;flex-direction:column;gap:20px;padding:28px;background:#15181c;border:1px solid #262b31;border-radius:16px">
+      <div style="display:flex;align-items:baseline;gap:12px">
+        <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;padding:3px 8px;border-radius:5px;background:#4fc3a1;color:#15181c;font-weight:500">1b</span>
+        <h2 style="margin:0;font-size:19px;font-weight:600">Twisted pair</h2>
+      </div>
+      <p style="margin:0;font-size:13.5px;line-height:1.5;color:#9aa2ab">CAN_H / CAN_L crossing on the physical layer, with a node dot at the centre. Two-colour, hardware-flavoured, distinct from every other terminal icon.</p>
+      <div style="display:flex;align-items:flex-end;gap:24px;flex-wrap:wrap">
+        <svg width="160" height="160"><use href="#icoB"></use></svg>
+        <svg width="64" height="64"><use href="#icoB"></use></svg>
+        <svg width="32" height="32"><use href="#icoB"></use></svg>
+        <svg width="16" height="16"><use href="#icoB"></use></svg>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:#f3f4f6;border-radius:8px">
+          <svg width="20" height="20"><use href="#icoB"></use></svg>
+          <span style="font-size:12.5px;color:#20242a">Light taskbar</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:#202225;border-radius:8px">
+          <svg width="20" height="20"><use href="#icoB"></use></svg>
+          <span style="font-size:12.5px;color:#d6d9dd">Dark taskbar</span>
+        </div>
+      </div>
+    </article>
+
+    <article id="1c" style="display:flex;flex-direction:column;gap:20px;padding:28px;background:#15181c;border:1px solid #262b31;border-radius:16px">
+      <div style="display:flex;align-items:baseline;gap:12px">
+        <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;padding:3px 8px;border-radius:5px;background:#5fd08a;color:#15181c;font-weight:500">1c</span>
+        <h2 style="margin:0;font-size:19px;font-weight:600">Terminal prompt</h2>
+      </div>
+      <p style="margin:0;font-size:13.5px;line-height:1.5;color:#9aa2ab">Chevron + cursor over trace lines — leans on the "Terminal" half of the name. Safest at 16px because the chevron survives any downscale.</p>
+      <div style="display:flex;align-items:flex-end;gap:24px;flex-wrap:wrap">
+        <svg width="160" height="160"><use href="#icoC"></use></svg>
+        <svg width="64" height="64"><use href="#icoC"></use></svg>
+        <svg width="32" height="32"><use href="#icoC"></use></svg>
+        <svg width="16" height="16"><use href="#icoC"></use></svg>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:#f3f4f6;border-radius:8px">
+          <svg width="20" height="20"><use href="#icoC"></use></svg>
+          <span style="font-size:12.5px;color:#20242a">Light taskbar</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:#202225;border-radius:8px">
+          <svg width="20" height="20"><use href="#icoC"></use></svg>
+          <span style="font-size:12.5px;color:#d6d9dd">Dark taskbar</span>
+        </div>
+      </div>
+    </article>
+
+    <article id="1d" style="display:flex;flex-direction:column;gap:20px;padding:28px;background:#15181c;border:1px solid #262b31;border-radius:16px">
+      <div style="display:flex;align-items:baseline;gap:12px">
+        <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;padding:3px 8px;border-radius:5px;background:#c8442f;color:#f6f7f8;font-weight:500">1d</span>
+        <h2 style="margin:0;font-size:19px;font-weight:600">Frame rows</h2>
+      </div>
+      <p style="margin:0;font-size:13.5px;line-height:1.5;color:#9aa2ab">The trace table abstracted into ID / DLC / data blocks. The only light tile of the four — it stands out in a dark taskbar rather than disappearing into it.</p>
+      <div style="display:flex;align-items:flex-end;gap:24px;flex-wrap:wrap">
+        <svg width="160" height="160"><use href="#icoD"></use></svg>
+        <svg width="64" height="64"><use href="#icoD"></use></svg>
+        <svg width="32" height="32"><use href="#icoD"></use></svg>
+        <svg width="16" height="16"><use href="#icoD"></use></svg>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:#f3f4f6;border-radius:8px">
+          <svg width="20" height="20"><use href="#icoD"></use></svg>
+          <span style="font-size:12.5px;color:#20242a">Light taskbar</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:#202225;border-radius:8px">
+          <svg width="20" height="20"><use href="#icoD"></use></svg>
+          <span style="font-size:12.5px;color:#d6d9dd">Dark taskbar</span>
+        </div>
+      </div>
+    </article>
+
+  </div>
+
+  <footer style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#6f777f;line-height:1.7">
+    .ico 빌드 시: 256 / 64 / 48 / 32 / 24 / 16 px 레이어 포함 · 16px 레이어는 스트로크를 1px 그리드에 맞춰 별도 조정 권장
+  </footer>
+</section>
+
+</x-dc>
+</body>
+</html>

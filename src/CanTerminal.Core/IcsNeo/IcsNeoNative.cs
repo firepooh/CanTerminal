@@ -100,8 +100,12 @@ internal static class IcsNeoNative
     [DllImport(Dll, CallingConvention = CallingConvention.StdCall)]
     public static extern void icsneoFreeObject(IntPtr handle);
 
+    // Raw pointer, not IcsSpyMessage[]. As a managed array parameter the runtime routes this
+    // through MngdNativeArrayMarshaler and marshals all MaxRxBuffer elements on every call —
+    // 1.4 MB in and out, 20 times a second, no matter how many frames actually arrived. A CPU
+    // trace on a live ValueCAN put that marshalling at a fifth of the receive thread.
     [DllImport(Dll, CallingConvention = CallingConvention.StdCall)]
-    public static extern int icsneoGetMessages(IntPtr handle, [Out] IcsSpyMessage[] messages, ref int count, ref int numErrors);
+    public static extern unsafe int icsneoGetMessages(IntPtr handle, IcsSpyMessage* messages, ref int count, ref int numErrors);
 
     [DllImport(Dll, CallingConvention = CallingConvention.StdCall)]
     public static extern int icsneoTxMessages(IntPtr handle, ref IcsSpyMessage message, int networkId, int numMessages);
@@ -109,8 +113,9 @@ internal static class IcsNeoNative
     [DllImport(Dll, CallingConvention = CallingConvention.StdCall)]
     public static extern int icsneoWaitForRxMessagesWithTimeOut(IntPtr handle, uint timeoutMs);
 
+    // Also by pointer: this one is called per frame, and "ref" copies the struct both ways.
     [DllImport(Dll, CallingConvention = CallingConvention.StdCall)]
-    public static extern int icsneoGetTimeStampForMsg(IntPtr handle, ref IcsSpyMessage message, ref double timestamp);
+    public static extern unsafe int icsneoGetTimeStampForMsg(IntPtr handle, IcsSpyMessage* message, ref double timestamp);
 
     [DllImport(Dll, CallingConvention = CallingConvention.StdCall)]
     public static extern int icsneoSetBitRate(IntPtr handle, int bitRate, int networkId);

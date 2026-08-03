@@ -1,0 +1,37 @@
+<Window x:Class="CanTerminal.App.XcpSessionDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="XCP session" Width="420" SizeToContent="Height" ResizeMode="NoResize"
+        ShowInTaskbar="False" WindowStartupLocation="CenterOwner" Loaded="Window_Loaded">
+    <StackPanel Margin="16">
+        <TextBlock Text="One XCP session per channel: a 2-port master uses a different CAN ID pair on each."
+                   TextWrapping="Wrap" Foreground="#5E6B78" FontSize="11.5" Margin="0,0,0,12"/>
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+
+            <TextBlock Grid.Row="0" Grid.Column="0" Text="Channel" VerticalAlignment="Center" Margin="0,0,10,6"/>
+            <ComboBox x:Name="ChannelCombo" Grid.Row="0" Grid.Column="1" Margin="0,0,0,6"/>
+
+            <TextBlock Grid.Row="1" Grid.Column="0" Text="Request (hex)" VerticalAlignment="Center" Margin="0,0,10,6"/>
+            <TextBox x:Name="ReqBox" Grid.Row="1" Grid.Column="1" Margin="0,0,0,6" Padding="4,3" FontFamily="Consolas"
+                     ToolTip="CAN ID the master sends commands on (CMD)"/>
+
+            <TextBlock Grid.Row="2" Grid.Column="0" Text="Response (hex)" VerticalAlignment="Center" Margin="0,0,10,0"/>
+            <TextBox x:Name="RspBox" Grid.Row="2" Grid.Column="1" Padding="4,3" FontFamily="Consolas"
+                     ToolTip="CAN ID the slave answers and sends DAQ-DTOs on (RES/DAQ)"/>
+        </Grid>
+
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,16,0,0">
+            <Button Content="OK" IsDefault="True" Width="80" Padding="0,4" Click="Ok_Click"/>
+            <Button Content="Cancel" IsCancel="True" Width="80" Padding="0,4" Margin="8,0,0,0"/>
+        </StackPanel>
+    </StackPanel>
+</Window>

@@ -3,156 +3,325 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:local="clr-namespace:CanTerminal.App"
         Title="CanTerminal — ValueCAN Monitor" Height="760" Width="1280"
-        Icon="pack://application:,,,/canterminal.ico"
+        Icon="pack://application:,,,/CanTerminal;component/canterminal.ico"
         Closing="Window_Closing">
+
     <Window.Resources>
-        <!-- Toolbar breathing room. Safe as implicit styles: nothing in the panes is harmed by
-             a margin, and the data templates use TextBlock and Border rather than these. -->
-        <Style TargetType="CheckBox">
-            <Setter Property="Margin" Value="8,0,0,0"/>
-            <Setter Property="VerticalAlignment" Value="Center"/>
+        <!-- Keyed, never implicit: an implicit Button/TextBox style here would also reach inside
+             the panes, whose controls are laid out on their own terms. -->
+        <Style x:Key="AccentButton" TargetType="Button">
+            <Setter Property="Foreground" Value="#FFFFFF"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="FontSize" Value="12.5"/>
+            <Setter Property="Height" Value="30"/>
+            <Setter Property="Padding" Value="16,0"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Chrome" Background="#0F9B78" CornerRadius="6">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
+                                              Margin="{TemplateBinding Padding}"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Chrome" Property="Background" Value="#0C8767"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="Chrome" Property="Background" Value="#0A6E54"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="Chrome" Property="Background" Value="#BFC8D0"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
         </Style>
-        <Style TargetType="Button">
-            <Setter Property="Margin" Value="5,0,0,0"/>
-            <Setter Property="Padding" Value="7,1"/>
+
+        <Style x:Key="FlatButton" TargetType="Button">
+            <Setter Property="Foreground" Value="#33404D"/>
+            <Setter Property="FontSize" Value="12.5"/>
+            <Setter Property="Height" Value="28"/>
+            <Setter Property="Padding" Value="13,0"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="Chrome" Background="#F0F3F6" BorderBrush="#D0D8E0"
+                                BorderThickness="1" CornerRadius="6">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
+                                              Margin="{TemplateBinding Padding}"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Chrome" Property="Background" Value="#E7ECF1"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="Chrome" Property="Background" Value="#DBE2E9"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Foreground" Value="#A9B3BC"/>
+                                <Setter TargetName="Chrome" Property="Background" Value="#F5F7F9"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
         </Style>
-        <Style TargetType="TextBox">
-            <Setter Property="Margin" Value="2,0,0,0"/>
-            <Setter Property="VerticalAlignment" Value="Center"/>
+
+        <Style x:Key="FlatToggle" TargetType="ToggleButton">
+            <Setter Property="Foreground" Value="#4A5764"/>
+            <Setter Property="FontSize" Value="12.5"/>
+            <Setter Property="Height" Value="28"/>
+            <Setter Property="Padding" Value="13,0"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ToggleButton">
+                        <Border x:Name="Chrome" Background="Transparent" BorderBrush="#D0D8E0"
+                                BorderThickness="1" CornerRadius="6">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"
+                                              Margin="{TemplateBinding Padding}"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Chrome" Property="Background" Value="#F0F3F6"/>
+                            </Trigger>
+                            <!-- Paused means the trace has stopped telling the truth about the bus,
+                                 so the state has to be unmistakable, not a subtle tint. -->
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Chrome" Property="Background" Value="#FFE9A8"/>
+                                <Setter TargetName="Chrome" Property="BorderBrush" Value="#D9A81E"/>
+                                <Setter Property="Foreground" Value="#6B4E00"/>
+                                <Setter Property="FontWeight" Value="SemiBold"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
         </Style>
-        <Style TargetType="ComboBox">
-            <Setter Property="Margin" Value="2,0,0,0"/>
-            <Setter Property="VerticalAlignment" Value="Center"/>
-        </Style>
-        <Style TargetType="Label">
-            <Setter Property="Margin" Value="6,0,0,0"/>
-            <Setter Property="Padding" Value="0,3"/>
-            <Setter Property="VerticalAlignment" Value="Center"/>
+
+        <Style x:Key="MonoBox" TargetType="TextBox">
+            <Setter Property="FontFamily" Value="Consolas"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Height" Value="28"/>
+            <Setter Property="Padding" Value="7,0"/>
+            <Setter Property="BorderBrush" Value="#CCD5DD"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
         </Style>
     </Window.Resources>
-    <Grid>
-        <Grid.RowDefinitions>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="*"/>
-            <RowDefinition Height="Auto"/>
-        </Grid.RowDefinitions>
 
-        <!-- connection toolbar -->
-        <Border Grid.Row="0" BorderBrush="#DDD" BorderThickness="0,0,0,1" Padding="6,5">
-            <WrapPanel>
-                <Label Content="Device:"/>
-                <ComboBox x:Name="DeviceCombo" Width="230"/>
-                <Button x:Name="RefreshButton" Content="Refresh" Click="RefreshButton_Click"/>
-                <Label Content="Channels:"/>
-                <TextBox x:Name="ChannelsBox" Width="140" Text="CAN1,CAN2"
-                         ToolTip="Comma separated: CAN1,CAN2,CAN3,CAN4,MSCAN,SWCAN&#10;Per-channel speed: NAME@bitrate[:fdbitrate], e.g. CAN1@500000,CAN2@125000&#10;Without @ the toolbar bitrate is used."/>
-                <Label Content="Bitrate:"/>
-                <ComboBox x:Name="BitrateCombo" Width="80" SelectedIndex="2">
-                    <ComboBoxItem Content="125000"/>
-                    <ComboBoxItem Content="250000"/>
-                    <ComboBoxItem Content="500000"/>
-                    <ComboBoxItem Content="1000000"/>
-                </ComboBox>
-                <CheckBox x:Name="FdCheck" Content="FD"/>
-                <ComboBox x:Name="FdBitrateCombo" Width="80" SelectedIndex="0">
-                    <ComboBoxItem Content="2000000"/>
-                    <ComboBoxItem Content="5000000"/>
-                    <ComboBoxItem Content="8000000"/>
-                </ComboBox>
-                <Button x:Name="ConnectButton" Content="Connect" Click="ConnectButton_Click" FontWeight="Bold"/>
-                <Separator Width="12" Visibility="Hidden"/>
-                <Button x:Name="DbcButton" Content="Load DBC…" Click="DbcButton_Click"/>
-                <TextBlock x:Name="DbcLabel" VerticalAlignment="Center" Margin="4,0" Foreground="Gray" Text="(no DBC)"/>
-                <Separator Width="12" Visibility="Hidden"/>
-                <CheckBox x:Name="ServerCheck" Content="API server" IsChecked="True" Checked="ServerCheck_Changed" Unchecked="ServerCheck_Changed"/>
-                <TextBox x:Name="PortBox" Width="55" Text="29536"/>
-            </WrapPanel>
-        </Border>
+    <Window.CommandBindings>
+        <CommandBinding Command="{x:Static local:AppCommands.LoadDbc}"        Executed="LoadDbc_Executed"/>
+        <CommandBinding Command="{x:Static local:AppCommands.SaveCsv}"        Executed="SaveCsv_Executed"/>
+        <CommandBinding Command="{x:Static local:AppCommands.RefreshDevices}" Executed="RefreshDevices_Executed" CanExecute="CanEditBusSettings"/>
+        <CommandBinding Command="{x:Static local:AppCommands.EditChannels}"   Executed="EditChannels_Executed"   CanExecute="CanEditBusSettings"/>
+        <CommandBinding Command="{x:Static local:AppCommands.Connect}"        Executed="Connect_Executed"        CanExecute="CanConnect"/>
+        <CommandBinding Command="{x:Static local:AppCommands.Disconnect}"     Executed="Disconnect_Executed"     CanExecute="CanDisconnect"/>
+        <CommandBinding Command="{x:Static local:AppCommands.LayoutSingle}"   Executed="LayoutSingle_Executed"/>
+        <CommandBinding Command="{x:Static local:AppCommands.LayoutSplitH}"   Executed="LayoutSplitH_Executed"/>
+        <CommandBinding Command="{x:Static local:AppCommands.LayoutSplitV}"   Executed="LayoutSplitV_Executed"/>
+        <CommandBinding Command="{x:Static local:AppCommands.JumpToLive}"     Executed="JumpToLive_Executed"/>
+        <CommandBinding Command="{x:Static local:AppCommands.TogglePause}"    Executed="TogglePause_Executed"/>
+        <CommandBinding Command="{x:Static local:AppCommands.ClearAll}"       Executed="ClearAll_Executed"/>
+        <CommandBinding Command="{x:Static local:AppCommands.SendFrame}"      Executed="SendFrame_Executed"      CanExecute="CanTransmit"/>
+        <CommandBinding Command="{x:Static local:AppCommands.StartCyclic}"    Executed="StartCyclic_Executed"    CanExecute="CanTransmit"/>
+        <CommandBinding Command="{x:Static local:AppCommands.StopCyclic}"     Executed="StopCyclic_Executed"     CanExecute="CanTransmit"/>
+        <CommandBinding Command="{x:Static local:AppCommands.Shortcuts}"      Executed="Shortcuts_Executed"/>
+    </Window.CommandBindings>
 
-        <!-- TX + view toolbar -->
-        <Border Grid.Row="1" BorderBrush="#DDD" BorderThickness="0,0,0,1" Padding="6,5" Background="#FAFAFA">
-            <WrapPanel>
-                <Label Content="TX:" FontWeight="Bold"/>
-                <ComboBox x:Name="TxChannelCombo" Width="75"/>
-                <Label Content="ID(hex):"/>
-                <TextBox x:Name="TxIdBox" Width="80" Text="123" FontFamily="Consolas"/>
-                <Label Content="Data(hex):"/>
-                <TextBox x:Name="TxDataBox" Width="200" Text="00 11 22 33" FontFamily="Consolas"/>
-                <CheckBox x:Name="TxExtCheck" Content="Ext"/>
-                <CheckBox x:Name="TxFdCheck" Content="FD"/>
-                <CheckBox x:Name="TxBrsCheck" Content="BRS"/>
-                <Button x:Name="SendButton" Content="Send" Click="SendButton_Click"/>
-                <Label Content="Cycle(ms):"/>
-                <TextBox x:Name="TxCycleBox" Width="50" Text="100"/>
-                <Button x:Name="PeriodicButton" Content="Start" Click="PeriodicButton_Click"/>
-                <Separator Width="18" Visibility="Hidden"/>
-                <Label Content="Layout:"/>
-                <ComboBox x:Name="LayoutCombo" Width="115" SelectedIndex="0" SelectionChanged="Layout_Changed"
-                          ToolTip="Single keeps one merged view, which preserves the true cross-channel time order.&#10;Split shows two panes, each with its own channel and view mode.">
-                    <ComboBoxItem Content="Single"/>
-                    <ComboBoxItem Content="Split ↔"/>
-                    <ComboBoxItem Content="Split ↕"/>
-                </ComboBox>
-                <Label Content="History:"/>
-                <TextBox x:Name="HistoryBox" Width="60" Text="50000" LostFocus="History_Changed"
-                         ToolTip="Trace rows kept per pane (min 100). Once full the oldest row is overwritten in place."/>
-                <CheckBox x:Name="AutoScrollCheck" Content="Autoscroll" IsChecked="True"/>
-                <CheckBox x:Name="HighlightCheck" Content="Highlight changes" IsChecked="True"
-                          Unchecked="HighlightCheck_Changed"
+    <DockPanel>
+        <!-- ===== menu bar ===== -->
+        <Menu x:Name="MainMenu" DockPanel.Dock="Top" Background="#FFFFFF" Padding="4,1">
+            <Menu.Resources>
+                <Style TargetType="MenuItem">
+                    <Setter Property="MinHeight" Value="27"/>
+                </Style>
+            </Menu.Resources>
+
+            <MenuItem Header="_File">
+                <MenuItem Header="_Load DBC…" Command="{x:Static local:AppCommands.LoadDbc}"/>
+                <!-- Filled on open; the placeholder exists because WPF never opens an empty submenu. -->
+                <MenuItem x:Name="MenuRecentDbc" Header="_Recent DBC" SubmenuOpened="RecentDbcMenu_Opened">
+                    <MenuItem Header="(none)" IsEnabled="False"/>
+                </MenuItem>
+                <MenuItem x:Name="MenuUnloadDbc" Header="_Unload DBC" Click="UnloadDbc_Click"/>
+                <Separator/>
+                <MenuItem Header="_Save trace as CSV…" Command="{x:Static local:AppCommands.SaveCsv}"/>
+                <Separator/>
+                <MenuItem Header="E_xit" InputGestureText="Alt+F4" Click="Exit_Click"/>
+            </MenuItem>
+
+            <MenuItem Header="_Bus">
+                <MenuItem Header="_Refresh devices" Command="{x:Static local:AppCommands.RefreshDevices}"/>
+                <MenuItem x:Name="MenuDevice" Header="_Device" SubmenuOpened="DeviceMenu_Opened">
+                    <MenuItem Header="(none)" IsEnabled="False"/>
+                </MenuItem>
+                <Separator/>
+                <MenuItem Header="_Channels…" Command="{x:Static local:AppCommands.EditChannels}"/>
+                <MenuItem x:Name="MenuBitrate" Header="_Bitrate" SubmenuOpened="BitrateMenu_Opened">
+                    <MenuItem Header="(none)" IsEnabled="False"/>
+                </MenuItem>
+                <MenuItem x:Name="MenuFd" Header="CAN _FD">
+                    <MenuItem x:Name="MenuFdEnabled" Header="_Enabled" IsCheckable="True" Click="FdEnabled_Click"/>
+                    <Separator/>
+                    <MenuItem x:Name="MenuFdBitrate" Header="Data _bitrate" SubmenuOpened="FdBitrateMenu_Opened">
+                        <MenuItem Header="(none)" IsEnabled="False"/>
+                    </MenuItem>
+                </MenuItem>
+                <Separator/>
+                <MenuItem x:Name="MenuConnect" Header="C_onnect" Command="{x:Static local:AppCommands.Connect}"/>
+                <MenuItem x:Name="MenuDisconnect" Header="_Disconnect" Command="{x:Static local:AppCommands.Disconnect}"/>
+            </MenuItem>
+
+            <MenuItem Header="_View">
+                <MenuItem Header="_Layout">
+                    <MenuItem x:Name="MenuLayoutSingle" Header="_Single" IsCheckable="True" IsChecked="True"
+                              Command="{x:Static local:AppCommands.LayoutSingle}"/>
+                    <MenuItem x:Name="MenuLayoutSplitH" Header="Split _horizontally  ↔" IsCheckable="True"
+                              Command="{x:Static local:AppCommands.LayoutSplitH}"/>
+                    <MenuItem x:Name="MenuLayoutSplitV" Header="Split _vertically  ↕" IsCheckable="True"
+                              Command="{x:Static local:AppCommands.LayoutSplitV}"/>
+                </MenuItem>
+                <MenuItem x:Name="MenuPaneA" Header="Pane _A" SubmenuOpened="PaneAMenu_Opened">
+                    <MenuItem Header="(none)" IsEnabled="False"/>
+                </MenuItem>
+                <MenuItem x:Name="MenuPaneB" Header="Pane _B" SubmenuOpened="PaneBMenu_Opened">
+                    <MenuItem Header="(none)" IsEnabled="False"/>
+                </MenuItem>
+                <Separator/>
+                <MenuItem x:Name="MenuHighlight" Header="_Highlight changes" IsCheckable="True" IsChecked="True"
+                          Unchecked="Highlight_Changed"
                           ToolTip="In the Fixed view, briefly highlight data bytes whose value changed."/>
-                <CheckBox x:Name="PauseCheck" Content="Pause"
-                          ToolTip="Pauses the view; frames arriving while paused are not shown after resume (still queryable via recent / the TCP API)."/>
-                <Button x:Name="ClearButton" Content="Clear" Click="ClearButton_Click"/>
-                <Button x:Name="SaveButton" Content="Save CSV…" Click="SaveButton_Click"/>
-            </WrapPanel>
+                <MenuItem Header="_Jump to newest" Command="{x:Static local:AppCommands.JumpToLive}"
+                          ToolTip="Return to the newest row after scrolling back through a paused capture."/>
+                <Separator/>
+                <MenuItem Header="History si_ze…" Click="HistorySize_Click"/>
+                <Separator/>
+                <!-- Mirrored to the toolbar toggle in code, not by an ElementName binding: a menu
+                     item inside a submenu popup stays unrealized until the menu is first opened,
+                     and its bindings do not attach before that. -->
+                <MenuItem x:Name="MenuPause" Header="_Pause display" IsCheckable="True" InputGestureText="F7"
+                          Checked="MenuPause_Changed" Unchecked="MenuPause_Changed"
+                          ToolTip="Freezes the view so the trace can be scrolled back through. Capture continues; frames that arrive while paused are not shown after resume (still queryable via recent / the TCP API)."/>
+                <Separator/>
+                <MenuItem Header="C_lear all" Command="{x:Static local:AppCommands.ClearAll}"/>
+            </MenuItem>
+
+            <MenuItem x:Name="MenuTransmit" Header="_Transmit">
+                <MenuItem Header="_Send frame" Command="{x:Static local:AppCommands.SendFrame}"/>
+                <MenuItem Header="S_tart cyclic TX" Command="{x:Static local:AppCommands.StartCyclic}"/>
+                <MenuItem Header="Sto_p cyclic TX" Command="{x:Static local:AppCommands.StopCyclic}"/>
+                <MenuItem Header="_Cycle time…" Click="CycleTime_Click"/>
+                <Separator/>
+                <MenuItem x:Name="MenuTxChannel" Header="TX c_hannel" SubmenuOpened="TxChannelMenu_Opened">
+                    <MenuItem Header="(none)" IsEnabled="False"/>
+                </MenuItem>
+                <MenuItem x:Name="MenuTxExt" Header="_Extended ID" IsCheckable="True"/>
+                <MenuItem x:Name="MenuTxFd" Header="CAN _FD frame" IsCheckable="True"/>
+                <MenuItem x:Name="MenuTxBrs" Header="_Bit rate switch" IsCheckable="True"/>
+            </MenuItem>
+
+            <MenuItem Header="_Profile">
+                <MenuItem x:Name="MenuProfileNone" Header="_None" IsCheckable="True" IsChecked="True"
+                          Click="ProfileNone_Click"/>
+                <MenuItem x:Name="MenuProfileXcp" Header="_XCP on CAN" IsCheckable="True"
+                          Click="ProfileXcp_Click"/>
+                <Separator/>
+                <MenuItem x:Name="MenuXcpSet" Header="_Set IDs on channel…" Click="XcpSet_Click"/>
+                <MenuItem x:Name="MenuXcpRemove" Header="_Remove session on channel"
+                          SubmenuOpened="XcpRemoveMenu_Opened">
+                    <MenuItem Header="(none)" IsEnabled="False"/>
+                </MenuItem>
+                <MenuItem x:Name="MenuXcpDetect" Header="_Detect all from capture" Click="XcpDetect_Click"
+                          ToolTip="Scan captured traffic for CONNECT or GET_SLAVE_ID exchanges and configure every channel found. Sends nothing on the bus."/>
+                <MenuItem x:Name="MenuXcpA2l" Header="Load IDs from _A2L…" Click="XcpA2l_Click"
+                          ToolTip="Read CAN_ID_MASTER / CAN_ID_SLAVE from IF_DATA XCP_ON_CAN. Select several files (p1, p2, …) to configure several channels at once."/>
+                <Separator/>
+                <MenuItem x:Name="MenuXcpOnly" Header="Show XCP IDs _only" IsCheckable="True"
+                          Checked="XcpOnly_Changed" Unchecked="XcpOnly_Changed"
+                          ToolTip="Hide everything except the configured XCP IDs. Applies to frames captured from now on; the Fixed view is reset."/>
+            </MenuItem>
+
+            <MenuItem Header="T_ools">
+                <MenuItem x:Name="MenuApiServer" Header="_API server" IsCheckable="True" IsChecked="True"
+                          Checked="ApiServer_Changed" Unchecked="ApiServer_Changed"/>
+                <MenuItem Header="API server _port…" Click="ApiPort_Click"/>
+                <Separator/>
+                <MenuItem Header="_Copy python snippet" Click="CopySnippet_Click"/>
+            </MenuItem>
+
+            <MenuItem Header="_Help">
+                <MenuItem Header="_Keyboard shortcuts" Command="{x:Static local:AppCommands.Shortcuts}"/>
+                <MenuItem Header="_README on GitHub" Click="Readme_Click"/>
+                <Separator/>
+                <MenuItem Header="_About CanTerminal" Click="About_Click"/>
+            </MenuItem>
+        </Menu>
+
+        <!-- ===== toolbar: only what gets touched while traffic is flowing ===== -->
+        <Border DockPanel.Dock="Top" Background="#F7F9FB" BorderBrush="#E2E8EE" BorderThickness="0,0,0,1"
+                Padding="12,9">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+
+                <Button x:Name="ConnectButton" Grid.Column="0" Content="Connect" Style="{StaticResource AccentButton}"
+                        Click="ConnectButton_Click"/>
+
+                <Rectangle Grid.Column="1" Width="1" Height="20" Fill="#D7DEE5" Margin="12,0"/>
+
+                <TextBlock Grid.Column="2" Text="TX" FontSize="12" Foreground="#6B7783" VerticalAlignment="Center"/>
+
+                <!-- Read-only: the TX channel is picked in Transmit ▸ TX channel. -->
+                <Border Grid.Column="3" Background="#FFFFFF" BorderBrush="#CCD5DD" BorderThickness="1"
+                        CornerRadius="6" Height="28" Padding="9,0" Margin="8,0,0,0"
+                        ToolTip="TX channel — change it in Transmit ▸ TX channel.">
+                    <TextBlock x:Name="TxChannelText" Text="—" FontFamily="Consolas" FontSize="12"
+                               VerticalAlignment="Center"/>
+                </Border>
+
+                <TextBox x:Name="TxIdBox" Grid.Column="4" Width="72" Text="123" Margin="8,0,0,0"
+                         Style="{StaticResource MonoBox}" ToolTip="TX arbitration ID (hex)"/>
+                <TextBox x:Name="TxDataBox" Grid.Column="5" MinWidth="170" Text="00 11 22 33" Margin="8,0,0,0"
+                         Style="{StaticResource MonoBox}" ToolTip="TX payload (hex bytes)"/>
+
+                <Button x:Name="SendButton" Grid.Column="6" Content="Send" Margin="8,0,0,0"
+                        Style="{StaticResource FlatButton}" Command="{x:Static local:AppCommands.SendFrame}"/>
+                <Button x:Name="PeriodicButton" Grid.Column="7" Content="Start · 100 ms" Margin="8,0,0,0"
+                        Style="{StaticResource FlatButton}" Click="PeriodicButton_Click"
+                        ToolTip="Repeat the frame above at the cycle time (Transmit ▸ Cycle time…)."/>
+
+                <Rectangle Grid.Column="8" Width="1" Height="20" Fill="#D7DEE5" Margin="12,0"/>
+
+                <ToggleButton x:Name="PauseButton" Grid.Column="9" Content="Pause"
+                              Style="{StaticResource FlatToggle}"
+                              Checked="PauseButton_Changed" Unchecked="PauseButton_Changed"
+                              ToolTip="Freeze the view to scroll back through the trace. Capture keeps running."/>
+                <Button Grid.Column="10" Content="Clear" Margin="8,0,0,0"
+                        Style="{StaticResource FlatButton}" Command="{x:Static local:AppCommands.ClearAll}"/>
+
+                <!-- What the menu now hides. Without this, a setting moved out of sight becomes a
+                     setting nobody can check. -->
+                <TextBlock x:Name="SummaryText" Grid.Column="12" FontFamily="Consolas" FontSize="11.5"
+                           Foreground="#7A858F" VerticalAlignment="Center" Margin="16,0,0,0"
+                           ToolTip="Channels · bitrate · DBC · protocol profile"/>
+            </Grid>
         </Border>
 
-        <!-- protocol profile toolbar -->
-        <Border Grid.Row="2" BorderBrush="#DDD" BorderThickness="0,0,0,1" Padding="6,5" Background="#F3F6FA">
-            <WrapPanel>
-                <Label Content="Profile:" FontWeight="Bold"/>
-                <ComboBox x:Name="ProfileCombo" Width="90" SelectedIndex="0" SelectionChanged="Profile_Changed">
-                    <ComboBoxItem Content="None"/>
-                    <ComboBoxItem Content="XCP"/>
-                </ComboBox>
-                <StackPanel x:Name="XcpPanel" Orientation="Horizontal" Visibility="Collapsed">
-                    <Label Content="Channel:"/>
-                    <ComboBox x:Name="XcpChannelCombo" Width="80" SelectionChanged="XcpChannel_Changed"
-                              ToolTip="One XCP session per channel: a 2-port master uses a different CAN ID pair on each."/>
-                    <Label Content="Req(hex):"/>
-                    <TextBox x:Name="XcpReqBox" Width="75" Text="701" FontFamily="Consolas"
-                             ToolTip="CAN ID the master sends commands on (CMD)"/>
-                    <Label Content="Rsp(hex):"/>
-                    <TextBox x:Name="XcpRspBox" Width="75" Text="702" FontFamily="Consolas"
-                             ToolTip="CAN ID the slave answers and sends DAQ-DTOs on (RES/DAQ)"/>
-                    <Button x:Name="XcpApplyButton" Content="Set" Click="XcpApply_Click"
-                            ToolTip="Configure the session for the selected channel."/>
-                    <Button x:Name="XcpRemoveButton" Content="Remove" Click="XcpRemove_Click"
-                            ToolTip="Drop the session on the selected channel."/>
-                    <Button x:Name="XcpDetectButton" Content="Detect all" Click="XcpDetect_Click"
-                            ToolTip="Scan captured traffic for CONNECT or GET_SLAVE_ID exchanges and configure every channel found. Sends nothing on the bus."/>
-                    <Button x:Name="XcpA2lButton" Content="From A2L…" Click="XcpA2l_Click"
-                            ToolTip="Read CAN_ID_MASTER / CAN_ID_SLAVE from IF_DATA XCP_ON_CAN. Select several files (p1, p2, …) to configure several channels at once."/>
-                    <CheckBox x:Name="XcpOnlyCheck" Content="XCP IDs only" VerticalAlignment="Center" Margin="10,0,0,0"
-                              Checked="XcpOnly_Changed" Unchecked="XcpOnly_Changed"
-                              ToolTip="Hide everything except the configured XCP IDs. Applies to frames captured from now on; the Fixed view is reset."/>
-                </StackPanel>
-                <TextBlock x:Name="XcpStatusText" VerticalAlignment="Center" Margin="8,0" Foreground="Gray"/>
-            </WrapPanel>
-        </Border>
-
-        <!-- one or two panes; row/column definitions are set by ApplyLayout -->
-        <Grid x:Name="PaneHost" Grid.Row="3">
-            <local:ChannelPane x:Name="PaneA"/>
-            <GridSplitter x:Name="PaneSplitter" Background="#CCC" Visibility="Collapsed"
-                          HorizontalAlignment="Stretch" VerticalAlignment="Stretch"/>
-            <local:ChannelPane x:Name="PaneB" Visibility="Collapsed"/>
-        </Grid>
-
-        <!-- status bar -->
-        <StatusBar Grid.Row="4">
+        <!-- ===== status bar ===== -->
+        <StatusBar DockPanel.Dock="Bottom">
             <StatusBarItem>
                 <TextBlock x:Name="ConnStatusText" Text="Disconnected" FontWeight="Bold"/>
             </StatusBarItem>
@@ -170,8 +339,20 @@
             </StatusBarItem>
             <Separator/>
             <StatusBarItem>
+                <TextBlock x:Name="XcpStatusText" Text="" Foreground="#33404D"/>
+            </StatusBarItem>
+            <Separator/>
+            <StatusBarItem>
                 <TextBlock x:Name="InfoText" Text="" Foreground="Gray"/>
             </StatusBarItem>
         </StatusBar>
-    </Grid>
+
+        <!-- one or two panes; row/column definitions are set by ApplyLayout -->
+        <Grid x:Name="PaneHost">
+            <local:ChannelPane x:Name="PaneA"/>
+            <GridSplitter x:Name="PaneSplitter" Background="#CCC" Visibility="Collapsed"
+                          HorizontalAlignment="Stretch" VerticalAlignment="Stretch"/>
+            <local:ChannelPane x:Name="PaneB" Visibility="Collapsed"/>
+        </Grid>
+    </DockPanel>
 </Window>

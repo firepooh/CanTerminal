@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  body { margin:0; background:#0a0d10; }
+  a { color:#4fc3a1; } a:hover { color:#6fd8ba; }
+  ::-webkit-scrollbar { width:10px; height:10px; }
+  ::-webkit-scrollbar-thumb { background:#2a343d; border-radius:5px; }
+  ::-webkit-scrollbar-track { background:transparent; }
+</style>
+</helmet>
+
+<div style="min-height:100vh;padding:32px;background:#0a0d10;font-family:'IBM Plex Sans',system-ui,sans-serif;display:flex;justify-content:center;overflow-x:auto;min-width:fit-content">
+<div style="width:1580px;flex:none;display:flex;flex-direction:column;gap:0;border-radius:12px;overflow:hidden;border:1px solid #232c34;box-shadow:0 24px 70px rgba(0,0,0,.6);background:#10161b">
+
+  <!-- title bar -->
+  <div style="display:flex;align-items:center;height:44px;padding-left:14px;background:#0d1216;border-bottom:1px solid #1c242b">
+    <svg width="18" height="18" viewBox="0 0 256 256" style="flex:none">
+      <rect x="8" y="8" width="240" height="240" rx="52" fill="#16222b"></rect>
+      <path d="M32 92 C 78 92, 78 164, 128 164 C 178 164, 178 92, 224 92" fill="none" stroke="#4fc3a1" stroke-width="20" stroke-linecap="round"></path>
+      <path d="M32 164 C 78 164, 78 92, 128 92 C 178 92, 178 164, 224 164" fill="none" stroke="#4a90d9" stroke-width="20" stroke-linecap="round"></path>
+    </svg>
+    <span style="margin-left:10px;font-size:12.5px;color:#b6c0c9;font-weight:500">CanTerminal</span>
+    <span style="margin-left:8px;font-size:12.5px;color:#5d6a76">ValueCAN Monitor</span>
+    <div style="flex:1"></div>
+    <div style="display:flex;height:44px">
+      <div style="width:46px;display:grid;place-items:center;color:#8b959e" style-hover="background:#1a222a">
+        <div style="width:11px;height:1.5px;background:currentColor"></div>
+      </div>
+      <div style="width:46px;display:grid;place-items:center;color:#8b959e" style-hover="background:#1a222a">
+        <div style="width:10px;height:10px;border:1.5px solid currentColor;border-radius:2px"></div>
+      </div>
+      <div style="width:46px;display:grid;place-items:center;color:#8b959e" style-hover="background:#c8442f;color:#fff">
+        <svg width="11" height="11" viewBox="0 0 12 12"><path d="M1 1 L11 11 M11 1 L1 11" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"></path></svg>
+      </div>
+    </div>
+  </div>
+
+  <!-- connection bar -->
+  <div style="display:flex;align-items:flex-end;gap:20px;padding:16px 20px;background:#10161b;border-bottom:1px solid #1c242b">
+    <div style="display:flex;flex-direction:column;gap:6px;flex:1.5;min-width:0">
+      <label style="font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:#67737e;font-weight:500">Device</label>
+      <div style="display:flex;gap:8px">
+        <div style="flex:1;min-width:0;display:flex;align-items:center;gap:8px;height:34px;padding:0 12px;background:#161e25;border:1px solid #28333c;border-radius:7px;font-size:13px;color:#dbe2e8" style-hover="border-color:#3a4650">
+          <span style="width:6px;height:6px;border-radius:3px;background:#67737e;flex:none"></span>
+          <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Virtual bus (no hardware)</span>
+          <div style="flex:1"></div>
+          <svg width="10" height="6" viewBox="0 0 10 6" style="flex:none"><path d="M1 1 L5 5 L9 1" stroke="#7d8892" stroke-width="1.4" fill="none" stroke-linecap="round"></path></svg>
+        </div>
+        <button style="height:34px;padding:0 12px;background:#1b242c;border:1px solid #2b353f;border-radius:7px;color:#b6c0c9;font-size:12.5px;font-family:inherit;cursor:pointer;white-space:nowrap" style-hover="background:#222d36;color:#e6ebef">Refresh</button>
+      </div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:6px;width:190px">
+      <label style="font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:#67737e;font-weight:500">Channels</label>
+      <div style="display:flex;align-items:center;gap:6px;height:34px;padding:0 8px;background:#161e25;border:1px solid #28333c;border-radius:7px">
+        <span style="padding:3px 8px;background:#1e3a34;color:#4fc3a1;border-radius:4px;font-family:'IBM Plex Mono',monospace;font-size:11.5px">CAN1</span>
+        <span style="padding:3px 8px;background:#1c3040;color:#63a4e0;border-radius:4px;font-family:'IBM Plex Mono',monospace;font-size:11.5px">CAN2</span>
+        <span style="color:#5d6a76;font-size:15px;line-height:1;margin-left:2px">+</span>
+      </div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:6px;width:250px">
+      <label style="font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:#67737e;font-weight:500">Bitrate</label>
+      <div style="display:flex;height:34px;border:1px solid #28333c;border-radius:7px;overflow:hidden;background:#161e25">
+        <div style="display:flex;align-items:center;gap:8px;padding:0 12px;font-family:'IBM Plex Mono',monospace;font-size:13px;color:#dbe2e8;border-right:1px solid #28333c">
+          <span>500k</span>
+          <svg width="10" height="6" viewBox="0 0 10 6"><path d="M1 1 L5 5 L9 1" stroke="#7d8892" stroke-width="1.4" fill="none" stroke-linecap="round"></path></svg>
+        </div>
+        <label style="display:flex;align-items:center;gap:7px;padding:0 11px;font-size:12.5px;color:#67737e;cursor:pointer;border-right:1px solid #28333c">
+          <span style="width:13px;height:13px;border:1.5px solid #3a4650;border-radius:3px;display:block"></span>FD
+        </label>
+        <div style="display:flex;align-items:center;gap:8px;padding:0 12px;font-family:'IBM Plex Mono',monospace;font-size:13px;color:#4d5964">
+          <span>2M</span>
+          <svg width="10" height="6" viewBox="0 0 10 6"><path d="M1 1 L5 5 L9 1" stroke="#4d5964" stroke-width="1.4" fill="none" stroke-linecap="round"></path></svg>
+        </div>
+      </div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:6px;flex:1;min-width:0">
+      <label style="font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:#67737e;font-weight:500">Database</label>
+      <div style="display:flex;align-items:center;gap:10px;height:34px">
+        <button style="height:34px;padding:0 14px;background:#1b242c;border:1px solid #2b353f;border-radius:7px;color:#b6c0c9;font-size:12.5px;font-family:inherit;cursor:pointer;white-space:nowrap" style-hover="background:#222d36;color:#e6ebef">Load DBC…</button>
+        <span style="font-size:12.5px;color:#5d6a76;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">no file loaded</span>
+      </div>
+    </div>
+
+    <button style="height:34px;padding:0 22px;background:#4fc3a1;border:none;border-radius:7px;color:#0b1418;font-size:13px;font-weight:600;font-family:inherit;cursor:pointer" style-hover="background:#61d4b2">Connect</button>
+  </div>
+
+  <!-- transmit bar -->
+  <div style="display:flex;align-items:center;gap:14px;padding:12px 20px;background:#0d1318;border-bottom:1px solid #1c242b">
+    <span style="font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:#67737e;font-weight:600;width:64px">Transmit</span>
+
+    <div style="display:flex;align-items:center;height:32px;border:1px solid #28333c;border-radius:7px;background:#161e25;overflow:hidden">
+      <span style="padding:0 10px;font-size:12px;color:#67737e;border-right:1px solid #28333c;line-height:30px">CH</span>
+      <span style="padding:0 10px;font-family:'IBM Plex Mono',monospace;font-size:12.5px;color:#dbe2e8;line-height:30px">CAN1</span>
+    </div>
+
+    <div style="display:flex;align-items:center;height:32px;border:1px solid #28333c;border-radius:7px;background:#161e25;overflow:hidden">
+      <span style="padding:0 10px;font-size:12px;color:#67737e;border-right:1px solid #28333c;line-height:30px">ID</span>
+      <span style="padding:0 12px;font-family:'IBM Plex Mono',monospace;font-size:12.5px;color:#e8b23a;line-height:30px;letter-spacing:.04em">123</span>
+    </div>
+
+    <div style="display:flex;align-items:center;height:32px;border:1px solid #28333c;border-radius:7px;background:#161e25;overflow:hidden;flex:1;min-width:0">
+      <span style="padding:0 10px;font-size:12px;color:#67737e;border-right:1px solid #28333c;line-height:30px">DATA</span>
+      <span style="padding:0 12px;font-family:'IBM Plex Mono',monospace;font-size:12.5px;color:#dbe2e8;line-height:30px;letter-spacing:.14em">00 11 22 33</span>
+      <div style="flex:1"></div>
+      <span style="padding:0 12px;font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:#5d6a76;line-height:30px">4 / 8 bytes</span>
+    </div>
+
+    <div style="display:flex;gap:6px">
+      <span style="padding:6px 11px;border:1px solid #2b353f;border-radius:6px;font-size:12px;color:#67737e;cursor:pointer" style-hover="border-color:#3d4a55;color:#a6b0b9">Ext</span>
+      <span style="padding:6px 11px;border:1px solid #2b353f;border-radius:6px;font-size:12px;color:#67737e;cursor:pointer" style-hover="border-color:#3d4a55;color:#a6b0b9">FD</span>
+      <span style="padding:6px 11px;border:1px solid #2b353f;border-radius:6px;font-size:12px;color:#67737e;cursor:pointer" style-hover="border-color:#3d4a55;color:#a6b0b9">BRS</span>
+    </div>
+
+    <div style="width:1px;height:24px;background:#232c34"></div>
+
+    <div style="display:flex;align-items:center;height:32px;border:1px solid #28333c;border-radius:7px;background:#161e25;overflow:hidden">
+      <span style="padding:0 10px;font-size:12px;color:#67737e;border-right:1px solid #28333c;line-height:30px">CYCLE</span>
+      <span style="padding:0 10px;font-family:'IBM Plex Mono',monospace;font-size:12.5px;color:#dbe2e8;line-height:30px">100 ms</span>
+    </div>
+
+    <button style="height:32px;padding:0 16px;background:#1b242c;border:1px solid #35424d;border-radius:7px;color:#dbe2e8;font-size:12.5px;font-family:inherit;cursor:pointer" style-hover="background:#232e37">Send</button>
+    <button style="height:32px;padding:0 16px;background:transparent;border:1px solid #2f6b58;border-radius:7px;color:#4fc3a1;font-size:12.5px;font-weight:500;font-family:inherit;cursor:pointer" style-hover="background:#152a25">Start cyclic</button>
+  </div>
+
+  <!-- view toolbar -->
+  <div style="display:flex;align-items:center;gap:12px;padding:10px 20px;background:#10161b;border-bottom:1px solid #1c242b">
+    <div style="display:flex;padding:2px;background:#161e25;border:1px solid #28333c;border-radius:7px">
+      <span style="padding:5px 14px;border-radius:5px;font-size:12.5px;background:#28333c;color:#e6ebef;font-weight:500;background:#28333c">Trace</span>
+      <span style="padding:5px 14px;border-radius:5px;font-size:12.5px;color:#7d8892;cursor:pointer" style-hover="color:#c3ccd4">Grouped</span>
+      <span style="padding:5px 14px;border-radius:5px;font-size:12.5px;color:#7d8892;cursor:pointer" style-hover="color:#c3ccd4">Signals</span>
+    </div>
+
+    <div style="display:flex;align-items:center;gap:6px;height:30px;padding:0 10px;background:#161e25;border:1px solid #28333c;border-radius:7px;font-size:12.5px;color:#b6c0c9">
+      <span style="color:#67737e">Channel</span><span>All</span>
+      <svg width="10" height="6" viewBox="0 0 10 6"><path d="M1 1 L5 5 L9 1" stroke="#7d8892" stroke-width="1.4" fill="none" stroke-linecap="round"></path></svg>
+    </div>
+
+    <div style="display:flex;align-items:center;gap:6px;height:30px;padding:0 10px;background:#161e25;border:1px solid #28333c;border-radius:7px;font-size:12.5px;color:#5d6a76;min-width:180px">
+      <svg width="12" height="12" viewBox="0 0 12 12"><circle cx="5" cy="5" r="3.6" fill="none" stroke="#5d6a76" stroke-width="1.4"></circle><path d="M8 8 L11 11" stroke="#5d6a76" stroke-width="1.4" stroke-linecap="round"></path></svg>
+      <span>Filter by ID, name, data…</span>
+    </div>
+
+    <span style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#5d6a76">{{ rowCountLabel }}</span>
+
+    <div style="flex:1"></div>
+
+    <label style="display:flex;align-items:center;gap:7px;font-size:12.5px;color:#b6c0c9;cursor:pointer">
+      <span style="width:14px;height:14px;border-radius:3px;background:#4fc3a1;display:grid;place-items:center">
+        <svg width="9" height="7" viewBox="0 0 9 7"><path d="M1 3.6 L3.4 6 L8 1" stroke="#0b1418" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+      </span>
+      Highlight changes
+    </label>
+    <div style="width:1px;height:20px;background:#232c34"></div>
+    <button style="height:30px;padding:0 13px;background:transparent;border:1px solid #2b353f;border-radius:6px;color:#a6b0b9;font-size:12.5px;font-family:inherit;cursor:pointer" style-hover="background:#1b242c;color:#e6ebef">Pause</button>
+    <button style="height:30px;padding:0 13px;background:transparent;border:1px solid #2b353f;border-radius:6px;color:#a6b0b9;font-size:12.5px;font-family:inherit;cursor:pointer" style-hover="background:#1b242c;color:#e6ebef">Clear</button>
+    <button style="height:30px;padding:0 13px;background:transparent;border:1px solid #2b353f;border-radius:6px;color:#a6b0b9;font-size:12.5px;font-family:inherit;cursor:pointer" style-hover="background:#1b242c;color:#e6ebef">Export CSV</button>
+  </div>
+
+  <!-- table -->
+  <div style="background:#0c1114;min-height:520px;display:flex;flex-direction:column">
+    <div style="display:grid;grid-template-columns:110px 76px 60px 92px 84px 56px 1fr 150px 210px;gap:0;padding:0 20px;height:34px;align-items:center;background:#0f1519;border-bottom:1px solid #1c242b;font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;color:#67737e;font-weight:600">
+      <span>Time</span><span>Chan</span><span>Dir</span><span>ID</span><span>Flags</span><span>DLC</span><span>Data</span><span>Frame type</span><span>Message</span>
+    </div>
+
+    <sc-for list="{{ rows }}" as="r" hint-placeholder-count="12">
+      <div style="display:grid;grid-template-columns:110px 76px 60px 92px 84px 56px 1fr 150px 210px;padding:0 20px;height:30px;align-items:center;font-family:'IBM Plex Mono',monospace;font-size:12.5px;color:#c3ccd4;border-bottom:1px solid #12181c" style-hover="background:#141c22">
+        <span style="color:#6e7b86">{{ r.t }}</span>
+        <span style="color:{{ r.chColor }}">{{ r.ch }}</span>
+        <span style="color:{{ r.dirColor }};font-size:11px;letter-spacing:.06em">{{ r.dir }}</span>
+        <span style="color:#e8b23a;letter-spacing:.04em">{{ r.id }}</span>
+        <span style="color:#5d6a76;font-size:11px;letter-spacing:.06em">{{ r.flags }}</span>
+        <span style="color:#8b959e">{{ r.dlc }}</span>
+        <span style="letter-spacing:.16em;white-space:nowrap;overflow:hidden;color:{{ r.dataColor }}">{{ r.data }}</span>
+        <span style="color:#6e7b86;font-family:'IBM Plex Sans',sans-serif;font-size:12px">{{ r.type }}</span>
+        <span style="color:#7d8892;font-family:'IBM Plex Sans',sans-serif;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.msg }}</span>
+      </div>
+    </sc-for>
+
+    <div style="flex:1"></div>
+  </div>
+
+  <!-- status bar -->
+  <div style="display:flex;align-items:center;gap:0;height:30px;padding:0 20px;background:#0d1216;border-top:1px solid #1c242b;font-size:11.5px;color:#6e7b86">
+    <span style="display:flex;align-items:center;gap:7px;color:#4fc3a1;font-weight:500;padding-right:16px">
+      <span style="width:6px;height:6px;border-radius:3px;background:#4fc3a1"></span>Connected
+    </span>
+    <span style="padding:0 16px;border-left:1px solid #1c242b;font-family:'IBM Plex Mono',monospace">1 842 fps</span>
+    <span style="padding:0 16px;border-left:1px solid #1c242b;font-family:'IBM Plex Mono',monospace">128 407 frames</span>
+    <span style="padding:0 16px;border-left:1px solid #1c242b;font-family:'IBM Plex Mono',monospace">bus load 34 %</span>
+    <span style="padding:0 16px;border-left:1px solid #1c242b;font-family:'IBM Plex Mono',monospace">err 0</span>
+    <div style="flex:1"></div>
+    <span style="font-family:'IBM Plex Mono',monospace">API 127.0.0.1:29536 · 0 clients</span>
+  </div>
+
+</div>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  renderVals() {
+    const raw = [
+      ['0.000412','CAN1','Rx','0x0C9','—','8','A1 04 00 12 7F 00 00 3E','Data','EngineData'],
+      ['0.001208','CAN1','Rx','0x1A0','—','8','00 00 5C 21 00 00 00 91','Data','WheelSpeed'],
+      ['0.002015','CAN2','Rx','0x2F1','FD BRS','16','11 22 33 44 55 66 77 88','FD Data','BatteryPack'],
+      ['0.002944','CAN1','Tx','0x123','—','4','00 11 22 33','Data','—'],
+      ['0.004102','CAN1','Rx','0x0C9','—','8','A1 04 00 12 7F 00 00 3E','Data','EngineData'],
+      ['0.005330','CAN2','Rx','0x3B8','Ext','8','FF FF 00 00 00 0A 00 00','Data','ChargeStatus'],
+      ['0.006219','CAN1','Rx','0x1A0','—','8','00 00 5D 21 00 00 00 92','Data','WheelSpeed'],
+      ['0.007014','CAN2','Rx','0x2F1','FD BRS','16','11 22 33 44 55 66 77 89','FD Data','BatteryPack'],
+      ['0.008331','CAN1','Rx','0x440','—','2','01 00','Data','DoorState'],
+      ['0.009507','CAN1','Rx','0x0C9','—','8','A1 04 00 13 7F 00 00 3E','Data','EngineData'],
+      ['0.010882','CAN2','Rx','0x7DF','—','8','02 01 0C 00 00 00 00 00','Remote','OBD Request'],
+      ['0.011760','CAN1','Rx','0x1A0','—','8','00 00 5E 21 00 00 00 93','Data','WheelSpeed'],
+      ['0.012644','CAN2','Rx','0x3B8','Ext','8','FF FF 00 00 00 0B 00 00','Data','ChargeStatus'],
+      ['0.013910','CAN1','Tx','0x123','—','4','00 11 22 33','Data','—'],
+      ['0.015027','CAN1','Rx','0x0C9','—','8','A1 04 00 13 7F 00 00 3F','Data','EngineData'],
+      ['0.016338','CAN2','Rx','0x2F1','FD BRS','16','11 22 33 44 55 66 77 8A','FD Data','BatteryPack'],
+    ];
+    const rows = raw.map(([t,ch,dir,id,flags,dlc,data,type,msg]) => ({
+      t, ch, dir, id, flags, dlc, data, type, msg,
+      chColor: ch === 'CAN1' ? '#4fc3a1' : '#63a4e0',
+      dirColor: dir === 'Tx' ? '#e8b23a' : '#6e7b86',
+      dataColor: dir === 'Tx' ? '#d9c69a' : '#c3ccd4',
+    }));
+    return { rows, rowCountLabel: rows.length.toLocaleString() + ' of 128 407 rows' };
+  }
+}
+</script>
+</body>
+</html>

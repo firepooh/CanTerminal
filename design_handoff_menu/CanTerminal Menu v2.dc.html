@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  body { margin:0; background:#eef1f4; }
+  a { color:#0f9b78; } a:hover { color:#6fd8ba; }
+</style>
+</helmet>
+
+<div style="min-height:100vh;padding:56px 64px 96px;background:#eef1f4;font-family:'IBM Plex Sans',system-ui,sans-serif;color:#1b2530;display:flex;flex-direction:column;gap:46px">
+
+  <header style="display:flex;flex-direction:column;gap:10px;max-width:840px">
+    <div style="font-family:'IBM Plex Mono',monospace;font-size:12px;letter-spacing:.16em;color:#7a858f;text-transform:uppercase">CanTerminal · WPF menu · v2 (코드 기준)</div>
+    <h1 style="margin:0;font-size:34px;font-weight:600;letter-spacing:-.02em">메뉴 시안 — 툴바 2줄을 1줄로</h1>
+    <p style="margin:0;font-size:15px;line-height:1.55;color:#5e6b78;text-wrap:pretty">MainWindow.xaml.cs의 실제 핸들러만으로 구성했습니다. 원칙: <strong style="color:#33404d;font-weight:500">연결 중 수시로 만지는 것만 툴바에 남기고</strong>, 세션당 한 번 정하는 설정(Device·Bitrate·Channels·History·Layout·XCP·API)은 메뉴로 내립니다. 새 기능은 넣지 않았습니다.</p>
+  </header>
+
+  <!-- menu bar + window -->
+  <section style="display:flex;flex-direction:column;gap:14px">
+    <h2 style="margin:0;font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:#7a858f;font-weight:600">제안 — 메뉴 바 + 축소된 툴바</h2>
+    <div style="border:1px solid #d7dee5;border-radius:10px;overflow:hidden">
+      <div style="display:flex;align-items:center;gap:10px;height:32px;padding:0 10px;background:#ffffff;border-bottom:1px solid #e2e8ee">
+        <svg width="15" height="15" viewBox="0 0 256 256" style="flex:none">
+          <rect x="8" y="8" width="240" height="240" rx="52" fill="#e8edf1"></rect>
+          <path d="M32 92 C 78 92, 78 164, 128 164 C 178 164, 178 92, 224 92" fill="none" stroke="#0f9b78" stroke-width="20" stroke-linecap="round"></path>
+          <path d="M32 164 C 78 164, 78 92, 128 92 C 178 92, 178 164, 224 164" fill="none" stroke="#2f6fb5" stroke-width="20" stroke-linecap="round"></path>
+        </svg>
+        <span style="font-size:12.5px;color:#5e6b78">CanTerminal — ValueCAN Monitor</span>
+      </div>
+      <div style="display:flex;align-items:center;height:30px;padding:0 6px;background:#f7f9fb;border-bottom:1px solid #e2e8ee;gap:1px">
+        <sc-for list="{{ bar }}" as="b" hint-placeholder-count="7">
+          <span style="padding:5px 11px;border-radius:4px;font-size:13px;color:#3d4a57;cursor:default" style-hover="background:#e7ecf1;color:#0f1720">{{ b }}</span>
+        </sc-for>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;padding:9px 12px;background:#f7f9fb;border-bottom:1px solid #e2e8ee;flex-wrap:wrap">
+        <button style="display:flex;align-items:center;gap:7px;height:30px;padding:0 16px;background:#0f9b78;border:none;border-radius:6px;color:#ffffff;font-size:12.5px;font-weight:600;font-family:inherit;cursor:pointer" style-hover="background:#0c8767">Connect</button>
+        <div style="width:1px;height:20px;background:#d7dee5;margin:0 4px"></div>
+        <span style="font-size:12px;color:#6b7783">TX</span>
+        <div style="display:flex;align-items:center;gap:6px;height:28px;padding:0 9px;background:#ffffff;border:1px solid #ccd5dd;border-radius:6px;font-family:'IBM Plex Mono',monospace;font-size:12px;color:#1b2530">CAN1</div>
+        <div style="display:flex;align-items:center;gap:6px;height:28px;padding:0 9px;background:#ffffff;border:1px solid #ccd5dd;border-radius:6px;font-family:'IBM Plex Mono',monospace;font-size:12px;color:#1b2530">123</div>
+        <div style="display:flex;align-items:center;gap:6px;height:28px;padding:0 9px;min-width:170px;background:#ffffff;border:1px solid #ccd5dd;border-radius:6px;font-family:'IBM Plex Mono',monospace;font-size:12px;color:#1b2530">00 11 22 33</div>
+        <button style="height:28px;padding:0 13px;background:#f0f3f6;border:1px solid #d0d8e0;border-radius:6px;color:#33404d;font-size:12.5px;font-family:inherit;cursor:pointer" style-hover="background:#e7ecf1;color:#0f1720">Send</button>
+        <button style="height:28px;padding:0 13px;background:#f0f3f6;border:1px solid #d0d8e0;border-radius:6px;color:#33404d;font-size:12.5px;font-family:inherit;cursor:pointer" style-hover="background:#e7ecf1;color:#0f1720">Start · 100 ms</button>
+        <div style="width:1px;height:20px;background:#d7dee5;margin:0 4px"></div>
+        <button style="height:28px;padding:0 13px;background:transparent;border:1px solid #d0d8e0;border-radius:6px;color:#4a5764;font-size:12.5px;font-family:inherit;cursor:pointer" style-hover="background:#f0f3f6;color:#0f1720">Pause</button>
+        <button style="height:28px;padding:0 13px;background:transparent;border:1px solid #d0d8e0;border-radius:6px;color:#4a5764;font-size:12.5px;font-family:inherit;cursor:pointer" style-hover="background:#f0f3f6;color:#0f1720">Clear</button>
+        <div style="flex:1;min-width:16px"></div>
+        <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:#7a858f">CAN1,CAN2 · 500k · no DBC · Profile: None</span>
+      </div>
+      <div style="height:120px;background:#f2f4f7;display:flex;align-items:center;justify-content:center;font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:#aab3bc">trace / fixed panes</div>
+    </div>
+    <p style="margin:0;font-size:13px;line-height:1.6;color:#5e6b78;max-width:860px">툴바 우측의 회색 요약줄은 메뉴로 내려간 설정의 현재 값을 그대로 읽어줍니다 — 메뉴에 숨긴 설정이 <em style="color:#33404d;font-style:normal">보이지 않는 상태</em>가 되지 않도록 하는 대가입니다.</p>
+  </section>
+
+  <!-- dropdowns -->
+  <section style="display:flex;flex-direction:column;gap:14px">
+    <h2 style="margin:0;font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:#7a858f;font-weight:600">드롭다운 전개 — {{ itemCount }}개 항목</h2>
+    <div style="display:flex;flex-wrap:wrap;align-items:flex-start;gap:22px">
+      <sc-for list="{{ menus }}" as="m" hint-placeholder-count="7">
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <div style="display:inline-flex;align-self:flex-start;padding:5px 12px;background:#e7ecf1;border-radius:4px;font-size:13px;color:#0f1720">{{ m.title }}</div>
+          <div style="min-width:{{ m.width }};padding:5px;background:#ffffff;border:1px solid #d0d8e0;border-radius:7px;box-shadow:0 14px 34px rgba(16,28,40,.14)">
+            <sc-for list="{{ m.items }}" as="it" hint-placeholder-count="10">
+              <sc-if value="{{ it.sep }}" hint-placeholder-val="{{ false }}">
+                <div style="height:1px;margin:5px 8px;background:#e4e9ef"></div>
+              </sc-if>
+              <sc-if value="{{ it.row }}" hint-placeholder-val="{{ true }}">
+                <div style="display:flex;align-items:center;gap:12px;height:27px;padding:0 8px;border-radius:4px" style-hover="background:#e7ecf1">
+                  <span style="width:12px;flex:none;font-size:11px;color:#0f9b78;text-align:center">{{ it.mark }}</span>
+                  <span style="font-size:13px;color:{{ it.color }};white-space:nowrap">{{ it.label }}</span>
+                  <div style="flex:1;min-width:22px"></div>
+                  <span style="font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:#7a858f;white-space:nowrap">{{ it.key }}</span>
+                  <span style="width:8px;flex:none;font-size:11px;color:#5e6b78">{{ it.sub }}</span>
+                </div>
+              </sc-if>
+            </sc-for>
+          </div>
+        </div>
+      </sc-for>
+    </div>
+  </section>
+
+  <!-- mapping -->
+  <section style="display:flex;flex-direction:column;gap:14px">
+    <h2 style="margin:0;font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:#7a858f;font-weight:600">현재 툴바 컨트롤 → 이동처</h2>
+    <div style="border:1px solid #e2e8ee;border-radius:10px;overflow:hidden">
+      <div style="display:grid;grid-template-columns:1.1fr 1.1fr 1.6fr;gap:1px;background:#e2e8ee">
+        <div style="padding:9px 14px;background:#ffffff;font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:#6b7783">컨트롤 (x:Name)</div>
+        <div style="padding:9px 14px;background:#ffffff;font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:#6b7783">이동처</div>
+        <div style="padding:9px 14px;background:#ffffff;font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:#6b7783">근거</div>
+        <sc-for list="{{ mapping }}" as="r" hint-placeholder-count="14">
+          <div style="padding:9px 14px;background:#ffffff;font-family:'IBM Plex Mono',monospace;font-size:12px;color:#33404d">{{ r.ctrl }}</div>
+          <div style="padding:9px 14px;background:#ffffff;font-size:12.5px;color:{{ r.color }}">{{ r.to }}</div>
+          <div style="padding:9px 14px;background:#ffffff;font-size:12.5px;color:#5e6b78;line-height:1.45">{{ r.why }}</div>
+        </sc-for>
+      </div>
+    </div>
+  </section>
+
+  <!-- xaml -->
+  <section style="display:flex;flex-direction:column;gap:14px">
+    <h2 style="margin:0;font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:#7a858f;font-weight:600">WPF 배선 — DockPanel 최상단 Menu</h2>
+    <pre style="margin:0;padding:20px 22px;background:#ffffff;border:1px solid #e2e8ee;border-radius:10px;overflow-x:auto;font-family:'IBM Plex Mono',monospace;font-size:12.5px;line-height:1.65;color:#3d4a57">&lt;Menu DockPanel.Dock="Top"&gt;
+  &lt;MenuItem Header="_Bus"&gt;
+    &lt;MenuItem x:Name="MenuBusRefresh"  Header="_Refresh devices" InputGestureText="F5"
+              Click="RefreshButton_Click" /&gt;
+    &lt;MenuItem x:Name="MenuBusDevice"   Header="_Device" ItemsSource="{Binding Devices}" /&gt;
+    &lt;MenuItem x:Name="MenuBusChannels" Header="_Channels…"  Click="ChannelsDialog_Click" /&gt;
+    &lt;MenuItem x:Name="MenuBusBitrate"  Header="_Bitrate" /&gt;
+    &lt;MenuItem x:Name="MenuBusFd"       Header="CAN _FD" IsCheckable="True"
+              IsChecked="{Binding ElementName=FdCheck, Path=IsChecked, Mode=TwoWay}" /&gt;
+    &lt;Separator /&gt;
+    &lt;MenuItem x:Name="MenuBusConnect"  Header="_Connect" InputGestureText="F9"
+              Click="ConnectButton_Click" /&gt;
+  &lt;/MenuItem&gt;
+&lt;/Menu&gt;</pre>
+    <p style="margin:0;font-size:13px;line-height:1.6;color:#5e6b78;max-width:860px">기존 <code style="font-family:'IBM Plex Mono',monospace;color:#0f9b78">*_Click</code> 핸들러를 그대로 재사용하고, 체크 항목은 남은 툴바 체크박스에 <code style="font-family:'IBM Plex Mono',monospace;color:#0f9b78">ElementName</code> 양방향 바인딩으로 묶으면 상태가 갈라지지 않습니다. Connect/Disconnect처럼 텍스트가 바뀌는 항목은 <code style="font-family:'IBM Plex Mono',monospace;color:#0f9b78">Disconnect()</code>에서 <code style="font-family:'IBM Plex Mono',monospace;color:#0f9b78">MenuBusConnect.Header</code>도 함께 갱신해야 합니다.</p>
+  </section>
+
+  <footer style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#7a858f;line-height:1.8">
+    비활성 규칙: 미연결 → Transmit 전체 · Bus▸Disconnect 비활성 / DBC 미로드 → File▸Unload DBC 비활성 /<br>
+    Layout=Single → View▸Pane B 비활성 / Profile=None → Profile의 XCP 항목 전부 비활성
+  </footer>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  renderVals() {
+    const DIM = '#a9b3bc', ON = '#1b2530';
+    const defs = [
+      ['File', '298px', [
+        ['Load DBC…', 'Ctrl+D'], ['Recent DBC', '', '', '▸'], ['Unload DBC', '', '', '', true],
+        '-',
+        ['Save trace as CSV…', 'Ctrl+S'],
+        '-',
+        ['Exit', 'Alt+F4'],
+      ]],
+      ['Bus', '318px', [
+        ['Refresh devices', 'F5'], ['Device', '', '', '▸'],
+        '-',
+        ['Channels…', 'Ctrl+Shift+C'], ['Bitrate', '', '', '▸'], ['CAN FD', '', '', '▸'],
+        '-',
+        ['Connect', 'F9'], ['Disconnect', 'Shift+F9', '', '', true],
+      ]],
+      ['View', '316px', [
+        ['Layout', '', '', '▸'], ['Pane A', '', '', '▸'], ['Pane B', '', '', '▸', true],
+        '-',
+        ['Autoscroll', '', '✓'], ['Highlight changes', '', '✓'], ['Jump to live', 'End'],
+        '-',
+        ['History size…', ''],
+        '-',
+        ['Pause display', 'F7'], ['Clear all', 'Ctrl+L'],
+      ]],
+      ['Transmit', '316px', [
+        ['Send frame', 'Ctrl+Enter', '', '', true], ['Start cyclic TX', 'F6', '', '', true],
+        ['Stop cyclic TX', 'Shift+F6', '', '', true], ['Cycle time…', '', '', '', true],
+        '-',
+        ['TX channel', '', '', '▸', true], ['Extended ID', '', '', '', true],
+        ['CAN FD frame', '', '', '', true], ['Bit rate switch', '', '', '', true],
+      ]],
+      ['Profile', '324px', [
+        ['None', '', '●'], ['XCP on CAN', ''],
+        '-',
+        ['Set IDs on channel…', '', '', '', true], ['Remove session on channel', '', '', '', true],
+        ['Detect all from capture', '', '', '', true], ['Load IDs from A2L…', '', '', '', true],
+        '-',
+        ['Show XCP IDs only', '', '', '', true],
+      ]],
+      ['Tools', '306px', [
+        ['API server', '', '✓'], ['API server port…', ''],
+        '-',
+        ['Copy python snippet', ''],
+      ]],
+      ['Help', '292px', [
+        ['Keyboard shortcuts', 'Ctrl+/'], ['README on GitHub', ''],
+        '-',
+        ['About CanTerminal', ''],
+      ]],
+    ];
+    const mk = it => it === '-'
+      ? { sep: true, row: false, label: '', key: '', mark: '', sub: '', color: ON }
+      : { sep: false, row: true, label: it[0], key: it[1] || '', mark: it[2] || '', sub: it[3] || '', color: it[4] ? DIM : ON };
+    const menus = defs.map(([title, width, items]) => ({ title, width, items: items.map(mk) }));
+
+    const KEEP = '#0f9b78', MOVE = '#33404d';
+    const mapping = [
+      ['DeviceCombo / RefreshButton', 'Bus ▸ Device / Refresh', '연결 전 한 번. 툴바 폭의 1/4을 쓰고 있음', MOVE],
+      ['ChannelsBox', 'Bus ▸ Channels…', 'CAN1@500000:2000000 같은 문법은 한 줄 입력칸보다 다이얼로그가 맞음', MOVE],
+      ['BitrateCombo / FdCheck / FdBitrateCombo', 'Bus ▸ Bitrate / CAN FD', '세션 시작 시 확정, 연결 중엔 못 바꿈', MOVE],
+      ['ConnectButton', '툴바 유지 (+ Bus ▸ Connect)', '가장 많이 누르는 단일 버튼', KEEP],
+      ['DbcButton / DbcLabel', 'File ▸ Load DBC…', '파일 열기는 관례상 File. 파일명은 요약줄에 표시', MOVE],
+      ['ServerCheck / PortBox', 'Tools ▸ API server', '켜두고 잊는 설정. 상태는 이미 상태바에 있음', MOVE],
+      ['TX 입력 일체 (Id/Data/Send/Start)', '툴바 유지', '실사용 중 계속 편집하는 유일한 입력 그룹', KEEP],
+      ['TxExtCheck / TxFdCheck / TxBrsCheck', 'Transmit 메뉴 체크', '체크박스 3개가 Send 버튼을 밀어냄. 대부분 기본값 유지', MOVE],
+      ['TxCycleBox', 'Transmit ▸ Cycle time…', 'Start 버튼 라벨에 현재 주기를 표기 (Start · 100 ms)', MOVE],
+      ['PauseCheck / ClearButton', '툴바 유지', '트래픽 읽는 중 반사적으로 누름', KEEP],
+      ['HighlightCheck / AutoScrollCheck', 'View 메뉴 체크', '한 번 정하면 잘 안 바꿈', MOVE],
+      ['LayoutCombo', 'View ▸ Layout', 'Ctrl+1/2/3으로 더 빠름', MOVE],
+      ['HistoryBox', 'View ▸ History size…', '5만 행 기본값을 바꾸는 일은 드묾', MOVE],
+      ['SaveButton', 'File ▸ Save trace as CSV…', '세션 끝에 한 번', MOVE],
+      ['ProfileCombo + XcpPanel 전체', 'Profile 메뉴', '툴바 두 번째 줄 전체를 차지하던 패널을 통째로 흡수', MOVE],
+      ['패널별 Channel / Trace·Fixed', '패널 헤더 유지', '패널에 속한 상태 — 창 메뉴로 올리면 어느 패널인지 모호해짐', KEEP],
+    ].map(([ctrl, to, why, color]) => ({ ctrl, to, why, color }));
+
+    return {
+      menus, mapping, bar: defs.map(d => d[0]),
+      itemCount: menus.reduce((n, m) => n + m.items.filter(i => i.row).length, 0),
+    };
+  }
+}
+</script>
+</body>
+</html>

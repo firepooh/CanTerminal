@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  body { margin:0; background:#0a0d10; }
+  a { color:#4fc3a1; } a:hover { color:#6fd8ba; }
+</style>
+</helmet>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <g id="s-refresh"><path d="M20 12a8 8 0 1 1-2.6-5.9" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path><path d="M20 4v4.5h-4.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></g>
+    <g id="s-connect"><path d="M10 14l-2.5 2.5a3.5 3.5 0 0 1-5-5L5 9" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path><path d="M14 10l2.5-2.5a3.5 3.5 0 0 1 5 5L19 15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path><path d="M9.5 14.5l5-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path></g>
+    <g id="s-disconnect"><path d="M9 14l-1.5 1.5a3.5 3.5 0 0 1-5-5L4 9" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path><path d="M15 10l1.5-1.5a3.5 3.5 0 0 1 5 5L20 15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path><path d="M4 4l16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path></g>
+    <g id="s-dbc"><ellipse cx="12" cy="6" rx="7" ry="2.8" fill="none" stroke="currentColor" stroke-width="2"></ellipse><path d="M5 6v12c0 1.55 3.13 2.8 7 2.8s7-1.25 7-2.8V6" fill="none" stroke="currentColor" stroke-width="2"></path><path d="M5 12c0 1.55 3.13 2.8 7 2.8s7-1.25 7-2.8" fill="none" stroke="currentColor" stroke-width="2"></path></g>
+    <g id="s-send"><path d="M4 12h13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path><path d="M13 8l4 4-4 4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path><path d="M20 5v14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path></g>
+    <g id="s-start"><path d="M7 5.5l11 6.5-11 6.5z" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linejoin="round"></path></g>
+    <g id="s-stop"><rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor"></rect></g>
+    <g id="s-pause"><rect x="7" y="5.5" width="3.6" height="13" rx="1.4" fill="currentColor"></rect><rect x="13.4" y="5.5" width="3.6" height="13" rx="1.4" fill="currentColor"></rect></g>
+    <g id="s-clear"><path d="M4 7h16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path><path d="M9 7V5.2A1.2 1.2 0 0 1 10.2 4h3.6A1.2 1.2 0 0 1 15 5.2V7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path><path d="M6.5 7l.9 12.1A1.9 1.9 0 0 0 9.3 21h5.4a1.9 1.9 0 0 0 1.9-1.9L17.5 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></g>
+    <g id="s-export"><path d="M12 3.5v11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path><path d="M8 10.5l4 4 4-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path><path d="M4.5 17v2.5a1 1 0 0 0 1 1h13a1 1 0 0 0 1-1V17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path></g>
+    <g id="s-search"><circle cx="10.5" cy="10.5" r="6" fill="none" stroke="currentColor" stroke-width="2"></circle><path d="M15 15l5 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path></g>
+    <g id="s-filter"><path d="M4 5.5h16l-6.2 7.3v6.4L10.2 21v-8.2z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"></path></g>
+    <g id="s-highlight"><rect x="3.5" y="5" width="9" height="5" rx="1.4" fill="none" stroke="currentColor" stroke-width="2"></rect><rect x="8" y="14" width="12.5" height="5" rx="1.4" fill="currentColor"></rect></g>
+    <g id="s-trace"><path d="M4 6.5h16M4 12h16M4 17.5h16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path></g>
+    <g id="s-grouped"><path d="M4 6.5h16M9 12h11M9 17.5h11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path><circle cx="4.5" cy="12" r="1.4" fill="currentColor"></circle><circle cx="4.5" cy="17.5" r="1.4" fill="currentColor"></circle></g>
+    <g id="s-signals"><polyline points="3,16 7,16 7,8 11,8 11,16 15,16 15,8 19,8 19,16 21,16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></polyline></g>
+    <g id="s-channel"><circle cx="5.5" cy="6" r="2.2" fill="none" stroke="currentColor" stroke-width="2"></circle><circle cx="5.5" cy="18" r="2.2" fill="none" stroke="currentColor" stroke-width="2"></circle><path d="M5.5 8.2v7.6M8 6h6.5M8 18h6.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path><circle cx="18" cy="6" r="2.2" fill="currentColor"></circle><circle cx="18" cy="18" r="2.2" fill="currentColor"></circle></g>
+    <g id="s-settings"><path d="M4 8h10M18 8h2M4 16h4M12 16h8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path><circle cx="16" cy="8" r="2.4" fill="none" stroke="currentColor" stroke-width="2"></circle><circle cx="10" cy="16" r="2.4" fill="none" stroke="currentColor" stroke-width="2"></circle></g>
+    <g id="s-copy"><rect x="8.5" y="8.5" width="12" height="12" rx="2.2" fill="none" stroke="currentColor" stroke-width="2"></rect><path d="M15.5 4.5h-11a1 1 0 0 0-1 1v11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path></g>
+    <g id="s-error"><path d="M12 4l9 16H3z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"></path><path d="M12 10v4.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path><circle cx="12" cy="17.4" r="1.2" fill="currentColor"></circle></g>
+    <g id="s-record"><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="2"></circle><circle cx="12" cy="12" r="4" fill="currentColor"></circle></g>
+    <g id="s-add"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path></g>
+    <g id="s-chevron"><path d="M8 10l4 4 4-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></g>
+    <g id="s-close"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path></g>
+  </defs>
+</svg>
+
+<div style="min-height:100vh;padding:56px 64px 96px;background:#0a0d10;font-family:'IBM Plex Sans',system-ui,sans-serif;color:#dbe2e8;display:flex;flex-direction:column;gap:44px">
+
+  <header style="display:flex;flex-direction:column;gap:10px;max-width:780px">
+    <div style="font-family:'IBM Plex Mono',monospace;font-size:12px;letter-spacing:.16em;color:#5d6a76;text-transform:uppercase">CanTerminal · UI icon set</div>
+    <h1 style="margin:0;font-size:34px;font-weight:600;letter-spacing:-.02em">툴바 아이콘 24종</h1>
+    <p style="margin:0;font-size:15px;line-height:1.55;color:#7d8892;text-wrap:pretty">24×24 그리드, 2px 스트로크, 라운드 캡 — 앱 아이콘 1b와 같은 기하 언어. 색은 <code style="font-family:'IBM Plex Mono',monospace;color:#4fc3a1">currentColor</code>를 따르므로 버튼 상태(기본 #a6b0b9 / 호버 #e6ebef / 활성 #4fc3a1)로 그대로 상속됩니다.</p>
+  </header>
+
+  <section style="display:flex;flex-direction:column;gap:16px">
+    <h2 style="margin:0;font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:#5d6a76;font-weight:600">전체 세트</h2>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(148px,1fr));gap:2px;background:#1a222a;border:1px solid #1a222a;border-radius:12px;overflow:hidden">
+      <sc-for list="{{ icons }}" as="ic" hint-placeholder-count="24">
+        <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:22px 10px;background:#10161b;color:#a6b0b9" style-hover="background:#161f26;color:#4fc3a1">
+          <svg width="24" height="24" viewBox="0 0 24 24"><use href="{{ ic.href }}"></use></svg>
+          <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#67737e">{{ ic.name }}</span>
+        </div>
+      </sc-for>
+    </div>
+  </section>
+
+  <section style="display:flex;flex-direction:column;gap:16px">
+    <h2 style="margin:0;font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:#5d6a76;font-weight:600">사이즈 검증 — 24 / 20 / 16 px</h2>
+    <div style="display:flex;flex-wrap:wrap;gap:28px;padding:24px 28px;background:#10161b;border:1px solid #1a222a;border-radius:12px">
+      <sc-for list="{{ icons }}" as="ic" hint-placeholder-count="24">
+        <div style="display:flex;align-items:flex-end;gap:8px;color:#c3ccd4">
+          <svg width="24" height="24" viewBox="0 0 24 24"><use href="{{ ic.href }}"></use></svg>
+          <svg width="20" height="20" viewBox="0 0 24 24"><use href="{{ ic.href }}"></use></svg>
+          <svg width="16" height="16" viewBox="0 0 24 24"><use href="{{ ic.href }}"></use></svg>
+        </div>
+      </sc-for>
+    </div>
+  </section>
+
+  <section style="display:flex;flex-direction:column;gap:16px">
+    <h2 style="margin:0;font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:#5d6a76;font-weight:600">인 컨텍스트 — 툴바 적용</h2>
+    <div style="border:1px solid #232c34;border-radius:12px;overflow:hidden">
+
+      <div style="display:flex;flex-wrap:wrap;row-gap:10px;align-items:center;gap:10px;padding:12px 18px;background:#10161b;border-bottom:1px solid #1c242b">
+        <div style="display:flex;align-items:center;gap:8px;height:34px;padding:0 12px;background:#161e25;border:1px solid #28333c;border-radius:7px;font-size:13px;color:#dbe2e8;min-width:230px">
+          <span style="color:#67737e;display:flex"><svg width="16" height="16" viewBox="0 0 24 24"><use href="#s-channel"></use></svg></span>
+          Virtual bus (no hardware)
+          <div style="flex:1"></div>
+          <span style="color:#7d8892;display:flex"><svg width="14" height="14" viewBox="0 0 24 24"><use href="#s-chevron"></use></svg></span>
+        </div>
+        <button style="display:flex;align-items:center;gap:7px;height:34px;padding:0 12px;background:#1b242c;border:1px solid #2b353f;border-radius:7px;color:#b6c0c9;font-size:12.5px;font-family:inherit;cursor:pointer" style-hover="background:#222d36;color:#e6ebef">
+          <svg width="15" height="15" viewBox="0 0 24 24"><use href="#s-refresh"></use></svg>Refresh
+        </button>
+        <button style="display:flex;align-items:center;gap:7px;height:34px;padding:0 14px;background:#1b242c;border:1px solid #2b353f;border-radius:7px;color:#b6c0c9;font-size:12.5px;font-family:inherit;cursor:pointer" style-hover="background:#222d36;color:#e6ebef">
+          <svg width="15" height="15" viewBox="0 0 24 24"><use href="#s-dbc"></use></svg>Load DBC…
+        </button>
+        <div style="flex:1"></div>
+        <button style="display:flex;align-items:center;gap:8px;height:34px;padding:0 18px;background:#4fc3a1;border:none;border-radius:7px;color:#0b1418;font-size:13px;font-weight:600;font-family:inherit;cursor:pointer" style-hover="background:#61d4b2">
+          <svg width="16" height="16" viewBox="0 0 24 24"><use href="#s-connect"></use></svg>Connect
+        </button>
+      </div>
+
+      <div style="display:flex;flex-wrap:wrap;row-gap:10px;align-items:center;gap:10px;padding:10px 18px;background:#0d1318;border-bottom:1px solid #1c242b">
+        <div style="display:flex;padding:2px;background:#161e25;border:1px solid #28333c;border-radius:7px">
+          <span style="display:flex;align-items:center;gap:7px;padding:5px 12px;border-radius:5px;font-size:12.5px;background:#28333c;color:#e6ebef;font-weight:500">
+            <svg width="15" height="15" viewBox="0 0 24 24"><use href="#s-trace"></use></svg>Trace
+          </span>
+          <span style="display:flex;align-items:center;gap:7px;padding:5px 12px;border-radius:5px;font-size:12.5px;color:#7d8892;cursor:pointer" style-hover="color:#c3ccd4">
+            <svg width="15" height="15" viewBox="0 0 24 24"><use href="#s-grouped"></use></svg>Grouped
+          </span>
+          <span style="display:flex;align-items:center;gap:7px;padding:5px 12px;border-radius:5px;font-size:12.5px;color:#7d8892;cursor:pointer" style-hover="color:#c3ccd4">
+            <svg width="15" height="15" viewBox="0 0 24 24"><use href="#s-signals"></use></svg>Signals
+          </span>
+        </div>
+        <div style="display:flex;align-items:center;gap:7px;height:30px;padding:0 10px;background:#161e25;border:1px solid #28333c;border-radius:7px;font-size:12.5px;color:#5d6a76;min-width:200px">
+          <svg width="14" height="14" viewBox="0 0 24 24"><use href="#s-search"></use></svg>Filter by ID, name, data…
+        </div>
+        <div style="flex:1"></div>
+        <button style="display:flex;align-items:center;gap:7px;height:30px;padding:0 12px;background:transparent;border:1px solid #2b353f;border-radius:6px;color:#4fc3a1;font-size:12.5px;font-family:inherit;cursor:pointer" style-hover="background:#152a25">
+          <svg width="15" height="15" viewBox="0 0 24 24"><use href="#s-highlight"></use></svg>Highlight
+        </button>
+        <button style="display:flex;align-items:center;gap:7px;height:30px;padding:0 12px;background:transparent;border:1px solid #2b353f;border-radius:6px;color:#a6b0b9;font-size:12.5px;font-family:inherit;cursor:pointer" style-hover="background:#1b242c;color:#e6ebef">
+          <svg width="15" height="15" viewBox="0 0 24 24"><use href="#s-pause"></use></svg>Pause
+        </button>
+        <button style="display:flex;align-items:center;gap:7px;height:30px;padding:0 12px;background:transparent;border:1px solid #2b353f;border-radius:6px;color:#a6b0b9;font-size:12.5px;font-family:inherit;cursor:pointer" style-hover="background:#1b242c;color:#e6ebef">
+          <svg width="15" height="15" viewBox="0 0 24 24"><use href="#s-clear"></use></svg>Clear
+        </button>
+        <button style="display:flex;align-items:center;gap:7px;height:30px;padding:0 12px;background:transparent;border:1px solid #2b353f;border-radius:6px;color:#a6b0b9;font-size:12.5px;font-family:inherit;cursor:pointer" style-hover="background:#1b242c;color:#e6ebef">
+          <svg width="15" height="15" viewBox="0 0 24 24"><use href="#s-export"></use></svg>Export CSV
+        </button>
+      </div>
+    </div>
+  </section>
+
+  <footer style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:#5d6a76;line-height:1.8">
+    24×24 viewBox · stroke 2 · linecap round · 16px 렌더 시 0.5px 그리드 스냅 권장<br>
+    상태 색: default #a6b0b9 · hover #e6ebef · active/on #4fc3a1 · danger #c8442f · disabled #4d5964
+  </footer>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  renderVals() {
+    const names = ['refresh','connect','disconnect','dbc','send','start','stop','pause','clear','export','search','filter','highlight','trace','grouped','signals','channel','settings','copy','error','record','add','chevron','close'];
+    return { icons: names.map(n => ({ name: n, href: '#s-' + n })) };
+  }
+}
+</script>
+</body>
+</html>
