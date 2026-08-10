@@ -31,6 +31,9 @@ internal static class Program
         VirtualBusRejectsAnOversizedPayload();
         FormatDataSurvivesAnOversizedPayload();
 
+        Section("Device selection");
+        TheVirtualBusIsNeverChosenForYou();
+
         Section("MessageHub");
         ClearReleasesTheRing();
 
@@ -143,6 +146,34 @@ internal static class Program
         Check("FormatData handles a payload no adapter would pass", text.Length == (256 * 1024 * 3) - 1);
     }
 
+    // ---------------- device selection ----------------
+
+    /// <summary>
+    /// A monitor that connects to a traffic generator on its own initiative cannot be trusted:
+    /// the frames on screen look exactly like a capture. The virtual bus stays available and
+    /// stays chosen once picked, but is never what a scan settles on by itself.
+    /// </summary>
+    private static void TheVirtualBusIsNeverChosenForYou()
+    {
+        const string Virtual = "Virtual bus (no hardware)";
+        const string Hardware = "ValueCAN/neoVI SN 1878373302";
+
+        // Mirrors what RefreshDevices builds: the virtual bus first, then any real device.
+        Device[] withHardware = [new(Virtual, false), new(Hardware, true)];
+        Device[] withoutHardware = [new(Virtual, false)];
+
+        static string? Pick(Device[] devices, string? previous) =>
+            MainWindow.PreferredDevice(devices, previous, d => d.Label, d => d.Real)?.Label;
+
+        Check("no hardware -> nothing selected", Pick(withoutHardware, null) is null);
+        Check("hardware present -> the device, not the virtual bus", Pick(withHardware, null) == Hardware);
+        Check("an explicit virtual-bus pick survives a rescan", Pick(withoutHardware, Virtual) == Virtual);
+        Check("and survives one that finds hardware too", Pick(withHardware, Virtual) == Virtual);
+        Check("a device that went away falls back to another", Pick(withHardware, "ValueCAN/neoVI SN 999") == Hardware);
+        Check("a device that went away with none left selects nothing",
+              Pick(withoutHardware, "ValueCAN/neoVI SN 999") is null);
+    }
+
     // ---------------- MessageHub ----------------
 
     private static void ClearReleasesTheRing()
@@ -240,6 +271,8 @@ internal static class Program
     }
 
     // ---------------- helpers ----------------
+
+    private sealed record Device(string Label, bool Real);
 
     private static DbcDecoder? LoadProbeDbc()
     {

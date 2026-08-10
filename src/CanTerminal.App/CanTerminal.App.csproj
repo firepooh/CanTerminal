@@ -17,6 +17,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- So rules that live in the window can be tested without standing a window up. -->
+    <InternalsVisibleTo Include="CanTerminal.RegressionTests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- Also as a resource, so the window can name it explicitly rather than relying on WPF
          falling back to the host process's icon. -->
     <Resource Include="..\..\GUI\canterminal.ico" Link="canterminal.ico" />

@@ -296,6 +296,16 @@ public partial class MainWindow : Window
         public override string ToString() => Label;
     }
 
+    /// <summary>
+    /// Which device a scan should leave selected. Split out from <see cref="RefreshDevices"/>
+    /// so the rule can be tested without a window: an explicit earlier pick wins, then the
+    /// first real device, then nothing. The virtual bus is only ever reached by the first arm,
+    /// i.e. because the user asked for it by name.
+    /// </summary>
+    internal static T? PreferredDevice<T>(IReadOnlyList<T> devices, string? previousLabel, Func<T, string> label, Func<T, bool> isRealHardware)
+        where T : class
+        => devices.FirstOrDefault(d => label(d) == previousLabel) ?? devices.FirstOrDefault(isRealHardware);
+
     private void RefreshDevices()
     {
         var items = new List<DeviceItem> { new("Virtual bus (no hardware)", null) };
@@ -314,16 +324,21 @@ public partial class MainWindow : Window
         }
         _devices = items;
 
-        // Keep the current pick across a rescan; otherwise prefer real hardware over the virtual bus.
-        string? previous = _device?.Label;
-        _device = items.FirstOrDefault(d => d.Label == previous) ?? (items.Count > 1 ? items[1] : items[0]);
+        // An explicit pick survives a rescan — including the virtual bus, so choosing it once
+        // does not have to be repeated on every F5.
+        //
+        // Otherwise the first real device, and nothing at all when there is none. The virtual
+        // bus is never selected on the program's own initiative: this is a monitor, and a
+        // monitor that quietly hands you invented traffic when the hardware is missing is
+        // answering a question nobody asked. Connect says so instead.
+        _device = PreferredDevice(items, _device?.Label, d => d.Label, d => d.Ics is not null);
         UpdateConnStatus();
     }
 
     private void UpdateConnStatus()
     {
         if (_adapter is null)
-            ConnStatusText.Text = _device is null ? "Disconnected" : $"Disconnected — {_device.Label}";
+            ConnStatusText.Text = _device is null ? "Disconnected — no device" : $"Disconnected — {_device.Label}";
     }
 
     private void ConnectButton_Click(object sender, RoutedEventArgs e)
@@ -334,7 +349,20 @@ public partial class MainWindow : Window
 
     private void Connect()
     {
-        if (_adapter != null || _device is null) return;
+        if (_adapter != null) return;
+        if (_device is null)
+        {
+            // Reachable only when the scan found no hardware, since that is the one case
+            // RefreshDevices leaves unselected. Saying nothing here would be the old behaviour
+            // wearing a different mask.
+            MessageBox.Show(this,
+                "No Intrepid device found.\n\n" +
+                "Plug in a ValueCAN / neoVI and press F5 (Bus ▸ Refresh devices).\n\n" +
+                "To work without hardware, pick Bus ▸ Device ▸ Virtual bus (no hardware) — " +
+                "it generates traffic of its own, so what you see will not have come from a bus.",
+                "Connect", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
         try
         {
             bool fd = MenuFdEnabled.IsChecked;

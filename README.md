@@ -20,7 +20,10 @@ dotnet build CanTerminal.slnx
 - 모니터: `src\CanTerminal.App\bin\Debug\net10.0-windows\CanTerminal.exe`
 - Fixed 뷰에서는 **값이 바뀐 데이터 바이트만** 파랗게 강조되고 약 1.4초에 걸쳐 서서히 사라집니다
   (`View ▸ Highlight changes`로 끌 수 있음). 처음 보는 ID는 비교 대상이 없으므로 강조하지 않습니다.
-- 하드웨어 없이 개발: `Bus ▸ Device`에서 **Virtual bus** 선택 → 주기 프레임 생성 + 송신 프레임을 `ID+0x100`으로 에코 응답
+- 하드웨어 없이 개발: `Bus ▸ Device`에서 **Virtual bus** 선택 → 주기 프레임 생성 + 송신 프레임을 `ID+0x100`으로 에코 응답.
+  **직접 고르기 전에는 절대 선택되지 않습니다** — 장치를 못 찾으면 아무것도 선택하지 않고, Connect가
+  그 사실을 알립니다. 모니터가 하드웨어 없을 때 조용히 지어낸 트래픽을 흘리면, 화면의 데이터가
+  버스에서 온 것인지 아닌지를 구분할 수 없게 됩니다 (한 번 선택한 뒤에는 `F5`를 눌러도 유지됩니다)
 - ValueCAN: Intrepid 드라이버(icsneo40.dll) 설치 필요. 채널 이름은 `CAN1`(HSCAN), `CAN2`(HSCAN2), `CAN3`, `CAN4`, `MSCAN`(ValueCAN3의 2번째 채널), `SWCAN`
 
 ## 화면 구성 — 메뉴 바 + 한 줄 툴바
