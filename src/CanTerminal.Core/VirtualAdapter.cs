@@ -54,6 +54,9 @@ public sealed class VirtualAdapter : ICanAdapter
         if (!_open) throw new InvalidOperationException("Virtual bus not open.");
         var ch = channel.ToUpperInvariant();
         if (!Channels.Contains(ch)) throw new ArgumentException($"Channel '{channel}' not configured.");
+        // The virtual bus is still a bus. Without this an API client could publish a frame no
+        // hardware could ever produce, and the display would try to format it.
+        CanFrame.ValidatePayload(data, fd);
 
         Publish(new CanFrame
         {
@@ -93,7 +96,12 @@ public sealed class VirtualAdapter : ICanAdapter
     {
         if (!_open) return;
         uint n = _counter++;
-        var ch = Channels.Count > 0 ? Channels[0] : "CAN1";
+        // One read. Close() runs on the UI thread and replaces Channels with an empty list, so
+        // testing Count and then indexing would be testing one list and indexing another —
+        // Timer.Dispose() does not wait for a callback already in flight. The _open check above
+        // narrows the window but does not close it.
+        var open = Channels;
+        var ch = open.Count > 0 ? open[0] : "CAN1";
 
         // fake "engine" data: rpm ramp + counter
         ushort rpm = (ushort)(800 + (n * 25) % 4200);

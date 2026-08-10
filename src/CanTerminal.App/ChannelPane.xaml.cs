@@ -1,6 +1,8 @@
 using System.Collections.ObjectModel;
+using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Data;
 using System.Windows.Input;
 using CanTerminal.Core;
 
@@ -50,6 +52,13 @@ public partial class ChannelPane : UserControl
         InitializeComponent();
         TraceList.ItemsSource = _traceRows;
         FixedGrid.ItemsSource = _fixedRows;
+
+        // The ID column advertises an ascending sort in XAML; without this the grid was in
+        // insertion order and the glyph was simply false — and the first click on the header
+        // then "toggled" to descending. SortKey rather than Id so the per-ODT rows XCP splits
+        // out of one CAN ID stay grouped underneath it.
+        CollectionViewSource.GetDefaultView(_fixedRows).SortDescriptions
+            .Add(new SortDescription(nameof(FixedRow.SortKey), ListSortDirection.Ascending));
         ChannelCombo.ItemsSource = new[] { AllChannels };
         ChannelCombo.SelectedIndex = 0;
 

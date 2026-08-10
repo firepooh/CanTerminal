@@ -33,4 +33,21 @@ public sealed class CanFrame
 
     public string IdText => IsExtended ? ArbId.ToString("X8") : ArbId.ToString("X3");
     public string DataText => Convert.ToHexString(Data);
+
+    /// <summary>Largest payload the bus itself allows: 8 bytes classic, 64 with CAN FD.</summary>
+    public static int MaxPayload(bool fd) => fd ? 64 : 8;
+
+    /// <summary>
+    /// Rejects a payload the bus could not carry. Every adapter calls this, not just the ones
+    /// talking to hardware: an oversized frame that reaches the display formats itself into a
+    /// stack-allocated buffer sized from its own length, so an adapter that accepts one hands
+    /// the UI thread a way to overflow its stack. The check belongs on the way in.
+    /// </summary>
+    public static void ValidatePayload(byte[] data, bool fd)
+    {
+        int max = MaxPayload(fd);
+        if (data.Length > max)
+            throw new ArgumentException(
+                $"Data too long ({data.Length} bytes); {(fd ? "CAN FD" : "classic CAN")} carries at most {max}.");
+    }
 }

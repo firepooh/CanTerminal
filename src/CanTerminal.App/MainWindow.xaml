@@ -259,8 +259,6 @@
                           SubmenuOpened="XcpRemoveMenu_Opened">
                     <MenuItem Header="(none)" IsEnabled="False"/>
                 </MenuItem>
-                <MenuItem x:Name="MenuXcpDetect" Header="_Detect all from capture" Click="XcpDetect_Click"
-                          ToolTip="Scan captured traffic for CONNECT or GET_SLAVE_ID exchanges and configure every channel found. Sends nothing on the bus."/>
                 <MenuItem x:Name="MenuXcpA2l" Header="Load IDs from _A2L…" Click="XcpA2l_Click"
                           ToolTip="Read CAN_ID_MASTER / CAN_ID_SLAVE from IF_DATA XCP_ON_CAN. Select several files (p1, p2, …) to configure several channels at once."/>
                 <Separator/>

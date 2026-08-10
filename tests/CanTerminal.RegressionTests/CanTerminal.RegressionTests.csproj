@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\CanTerminal.Core\CanTerminal.Core.csproj" />
+    <ProjectReference Include="..\..\src\CanTerminal.App\CanTerminal.App.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="probe.dbc" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <StartupObject>CanTerminal.RegressionTests.Program</StartupObject>
+  </PropertyGroup>
+
+</Project>

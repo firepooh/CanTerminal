@@ -263,7 +263,7 @@ public partial class MainWindow : Window
         MenuPaneB.IsEnabled = _layout != 0;
 
         bool xcp = IsXcpSelected;
-        MenuXcpSet.IsEnabled = MenuXcpRemove.IsEnabled = MenuXcpDetect.IsEnabled =
+        MenuXcpSet.IsEnabled = MenuXcpRemove.IsEnabled =
             MenuXcpA2l.IsEnabled = MenuXcpOnly.IsEnabled = xcp;
 
         MenuLayoutSingle.IsChecked = _layout == 0;
@@ -842,40 +842,6 @@ public partial class MainWindow : Window
                       });
     }
 
-    private void XcpDetect_Click(object sender, RoutedEventArgs e)
-    {
-        var frames = _hub.GetRecent(100_000);
-        var candidates = XcpAutoDetect.Scan(frames);
-        if (candidates.Count == 0)
-        {
-            MessageBox.Show(this,
-                $"No XCP-looking exchange found in the last {frames.Count:N0} captured frames.\n\n" +
-                "Detection needs a command/response pair in the capture — most reliably a CONNECT. " +
-                "If the session was already running before capture started, enter the IDs manually " +
-                "or read them from the A2L file.",
-                "XCP detect", MessageBoxButton.OK, MessageBoxImage.Information);
-            return;
-        }
-
-        // Scan returns candidates ranked by score, so the first hit per channel is its best.
-        var best = candidates
-            .GroupBy(c => c.Channel, StringComparer.OrdinalIgnoreCase)
-            .Select(g => g.First())
-            .ToList();
-        foreach (var c in best)
-            _xcpSessions[c.Channel] = new XcpConfig(c.RequestId, c.ResponseId, Channel: c.Channel);
-        RebuildXcpSessions();
-        _xcpChannel = best[0].Channel;
-
-        string applied = string.Join("\n", best.Select(c => $"  {c}"));
-        int others = candidates.Count - best.Count;
-        InfoText.Text = $"XCP detected on {best.Count} channel(s).";
-        MessageBox.Show(this,
-            $"Configured {best.Count} session(s):\n{applied}" +
-            (others > 0 ? $"\n\n{others} weaker candidate(s) ignored." : ""),
-            "XCP detect", MessageBoxButton.OK, MessageBoxImage.Information);
-    }
-
     private void XcpA2l_Click(object sender, RoutedEventArgs e)
     {
         var dlg = new OpenFileDialog
@@ -1000,6 +966,11 @@ public partial class MainWindow : Window
     private void ClearAll_Executed(object sender, ExecutedRoutedEventArgs e)
     {
         long discarded = _hub.TotalFrames;
+        // Before the panes: frames already queued for display were captured before Clear was
+        // pressed, and the next tick would put them straight back into the emptied trace —
+        // rows the hub has just dropped and recent() can no longer return. The first of them
+        // would also become the new time anchor, dating the capture from before the Clear.
+        while (_pending.TryDequeue(out _)) { }
         PaneA.ClearAll();
         PaneB.ClearAll();
         _hub.Clear();
@@ -1059,18 +1030,32 @@ public partial class MainWindow : Window
             // which is the whole capture rather than one pane's slice of it.
             var time = new TimeBase(_timestampMode, _zeroTs, _zeroWall);
             double previousTs = double.NaN;
-            var sb = new StringBuilder($"{time.ColumnHeader};Chan;Dir;ID;Flags;DLC;Data;Sender;FrameType;Comments\r\n");
-            foreach (var f in frames)
+            // Streamed rather than built as one string: a full ring is 200,000 rows, and
+            // StringBuilder plus ToString plus the UTF-8 encode meant three copies of a ~25 MB
+            // file on the large object heap before a byte reached the disk.
+            // Encoding.UTF8 rather than a bare UTF8Encoding: it emits the BOM, which is what
+            // makes Excel read the file as UTF-8 instead of the local code page. The previous
+            // File.WriteAllText call wrote one, and unit strings out of a DBC depend on it.
+            using (var writer = new StreamWriter(dlg.FileName, false, Encoding.UTF8))
             {
-                var r = TraceRow.From(f, time, previousTs);
-                previousTs = f.Timestamp;
-                sb.Append(r.Time).Append(';').Append(r.Chan).Append(';').Append(r.Dir).Append(';')
-                  .Append(r.Id).Append(';').Append(r.Flags).Append(';').Append(r.Dlc).Append(';')
-                  .Append(r.Data).Append(';').Append(r.Sender).Append(';')
-                  .Append(r.Type?.Replace(';', ',')).Append(';')
-                  .Append(r.Decoded?.Replace(';', ',')).Append("\r\n");
+                writer.NewLine = "\r\n";
+                writer.WriteLine($"{time.ColumnHeader};Chan;Dir;ID;Flags;DLC;Data;Sender;FrameType;Comments");
+                foreach (var f in frames)
+                {
+                    var r = TraceRow.From(f, time, previousTs);
+                    previousTs = f.Timestamp;
+                    writer.Write(r.Time); writer.Write(';');
+                    writer.Write(r.Chan); writer.Write(';');
+                    writer.Write(r.Dir); writer.Write(';');
+                    writer.Write(r.Id); writer.Write(';');
+                    writer.Write(r.Flags); writer.Write(';');
+                    writer.Write(r.Dlc); writer.Write(';');
+                    writer.Write(r.Data); writer.Write(';');
+                    writer.Write(r.Sender); writer.Write(';');
+                    writer.Write(Csv(r.Type)); writer.Write(';');
+                    writer.WriteLine(Csv(r.Decoded));
+                }
             }
-            File.WriteAllText(dlg.FileName, sb.ToString(), Encoding.UTF8);
             InfoText.Text = $"Saved {frames.Count:N0} captured frames to {dlg.FileName}";
         }
         catch (Exception ex)
@@ -1078,6 +1063,14 @@ public partial class MainWindow : Window
             MessageBox.Show(this, ex.Message, "Save failed", MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
+
+    /// <summary>
+    /// Makes a decoded comment safe to put in a semicolon-separated field. The separator is
+    /// swapped for a comma as before; newlines are folded because a comment carrying one would
+    /// otherwise split a row in two and silently shift every column after it.
+    /// </summary>
+    private static string? Csv(string? field) =>
+        field?.Replace(';', ',').Replace("\r\n", " ").Replace('\n', ' ').Replace('\r', ' ');
 
     private void Exit_Click(object sender, RoutedEventArgs e) => Close();
 

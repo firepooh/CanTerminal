@@ -111,8 +111,12 @@ public sealed class XcpDecoder
             0xF4 => $"NUMBER_OF_ELEMENTS = 0x{r.U8(1):X2}|EXTENSION = 0x{r.U8(3):X2}|ADDRESS = 0x{r.U32(4):X8}",
             0xF3 => $"BLOCK_SIZE = 0x{r.U32(4):X8}",
             0xF2 => DescribeTransportLayer(d),
-            0xF0 or 0xEE => $"NUMBER_OF_ELEMENTS = 0x{r.U8(1):X2}|DATA = {Hex(d, 2)}",
+            0xF0 => $"NUMBER_OF_ELEMENTS = 0x{r.U8(1):X2}|DATA = {Hex(d, 2)}",
             0xEF => $"NUMBER_OF_ELEMENTS = 0x{r.U8(1):X2}|DATA = {Hex(d, 2)}",
+            // DOWNLOAD_MAX / PROGRAM_MAX carry no element count — the payload is the rest of the
+            // CTO and its length is MAX_CTO-1 by definition. Reading a count here would report
+            // the first data byte as one and start DATA a byte late.
+            0xEE or 0xC9 => $"DATA = {Hex(d, 1)}",
             0xED => $"NUMBER_OF_ELEMENTS = 0x{r.U8(1):X2}|EXTENSION = 0x{r.U8(3):X2}|ADDRESS = 0x{r.U32(4):X8}",
             0xEC => $"SHIFT = 0x{r.U8(1):X2}|AND_MASK = 0x{r.U16(2):X4}|XOR_MASK = 0x{r.U16(4):X4}",
             0xEB => $"MODE = 0x{r.U8(1):X2}|SEGMENT = 0x{r.U8(2):X2}|PAGE = 0x{r.U8(3):X2}",
@@ -131,7 +135,7 @@ public sealed class XcpDecoder
             0xD4 => $"DAQ_LIST_NUMBER = 0x{r.U16(2):X4}|ODT_COUNT = 0x{r.U8(4):X2}",
             0xD3 => $"DAQ_LIST_NUMBER = 0x{r.U16(2):X4}|ODT_NUMBER = 0x{r.U8(4):X2}|ODT_ENTRIES_COUNT = 0x{r.U8(5):X2}",
             0xD1 => $"MODE = 0x{r.U8(1):X2}|CLEAR_RANGE = 0x{r.U32(4):X8}",
-            0xD0 or 0xC9 or 0xCA => $"NUMBER_OF_ELEMENTS = 0x{r.U8(1):X2}|DATA = {Hex(d, 2)}",
+            0xD0 or 0xCA => $"NUMBER_OF_ELEMENTS = 0x{r.U8(1):X2}|DATA = {Hex(d, 2)}",
             0xC0 => d.Length > 2 ? $"PARAMS = {Hex(d, 2)}" : null,
             // no-parameter commands: DISCONNECT, GET_STATUS, SYNCH, GET_COMM_MODE_INFO,
             // GET_DAQ_CLOCK, READ_DAQ, GET_DAQ_PROCESSOR_INFO, GET_DAQ_RESOLUTION_INFO, FREE_DAQ...
@@ -182,16 +186,16 @@ public sealed class XcpDecoder
         {
             case XcpTables.PidRes:
             {
-                var cmd = TakePending(f.Timestamp);
+                var (cmd, request) = TakePending(f.Timestamp);
                 string type = d.Length > 1 ? "CTO (OK + INFO)" : "CTO (OK)";
-                return new FrameAnnotation(type, DescribeResponse(cmd, d));
+                return new FrameAnnotation(type, DescribeResponse(cmd, request, d));
             }
             case XcpTables.PidErr:
             {
-                var cmd = TakePending(f.Timestamp);
+                var (cmd, request) = TakePending(f.Timestamp);
                 string name = d.Length > 1 ? XcpTables.Error(d[1]) : "ERR (no code)";
                 string comment = d.Length > 1 ? $"{name} (0x{d[1]:X2})" : name;
-                if (cmd is byte c) comment += $" ← {XcpTables.Command(c) ?? $"CMD 0x{c:X2}"}";
+                if (cmd is byte c) comment += $" ← {CommandName(c, request)}";
                 return new FrameAnnotation("CTO (ERR)", comment);
             }
             // EV and SERV are asynchronous: they must not consume the pending command.
@@ -206,19 +210,35 @@ public sealed class XcpDecoder
         }
     }
 
-    private byte? TakePending(double ts)
+    /// <summary>
+    /// Consumes the command this reply answers, together with the bytes that were sent with it.
+    ///
+    /// The payload has to come back with the command: several commands are only distinguishable
+    /// by their sub-command byte, and the response carries no copy of it. Reading the field
+    /// afterwards is not an option — this method is what clears it.
+    /// </summary>
+    private (byte? Cmd, byte[]? Request) TakePending(double ts)
     {
         // A stale pending command means we missed its response (frame loss, or the trace
         // started mid-command); don't pair it with an unrelated later reply.
-        if (_pendingCmd is null) return null;
-        if (ts - _pendingTs > MaxPendingAgeSeconds) { _pendingCmd = null; _pendingData = null; return null; }
+        if (_pendingCmd is null) return (null, null);
+        if (ts - _pendingTs > MaxPendingAgeSeconds) { _pendingCmd = null; _pendingData = null; return (null, null); }
         var cmd = _pendingCmd;
+        var data = _pendingData;
         _pendingCmd = null;
         _pendingData = null;
-        return cmd;
+        return (cmd, data);
     }
 
-    private string? DescribeResponse(byte? cmd, byte[] d)
+    /// <summary>Names a command, resolving the sub-command byte where one exists.</summary>
+    private static string CommandName(byte cmd, byte[]? request) => cmd switch
+    {
+        0xC0 when request is { Length: > 1 } r => XcpTables.Level1(r[1]),
+        0xF2 when request is { Length: > 1 } r => XcpTables.TransportLayer(r[1]),
+        _ => XcpTables.Command(cmd) ?? $"CMD 0x{cmd:X2}",
+    };
+
+    private string? DescribeResponse(byte? cmd, byte[]? request, byte[] d)
     {
         if (cmd is null)
             return d.Length > 1 ? $"DATA = {Hex(d, 1)}" : null;
@@ -277,18 +297,18 @@ public sealed class XcpDecoder
                 return $"GET_DAQ_LIST_MODE: MODE = 0x{d[1]:X2}{DaqListMode(d[1])}|EVENT_CHANNEL_NUMBER = 0x{r.U16(4):X4}" +
                        $"|PRESCALER = 0x{d[6]:X2}|PRIORITY = 0x{d[7]:X2}";
 
-            case 0xF2 when d.Length >= 8 && _pendingSubIsGetSlaveId(): // TRANSPORT_LAYER_CMD / GET_SLAVE_ID
+            case 0xF2 when d.Length >= 8 && IsGetSlaveId(request): // TRANSPORT_LAYER_CMD / GET_SLAVE_ID
                 return $"GET_SLAVE_ID: MAGIC = '{Ascii(d, 1, 3)}'|CAN_ID = 0x{r.U32(4):X8}";
 
             default:
             {
-                string name = XcpTables.Command(cmd.Value) ?? $"CMD 0x{cmd:X2}";
+                string name = CommandName(cmd.Value, request);
                 return d.Length > 1 ? $"{name}: DATA = {Hex(d, 1)}" : name;
             }
         }
     }
 
-    private bool _pendingSubIsGetSlaveId() => _pendingData is { Length: > 1 } p && p[1] == 0xFF;
+    private static bool IsGetSlaveId(byte[]? request) => request is { Length: > 1 } p && p[1] == 0xFF;
 
     // ---------------- DAQ / STIM data objects ----------------
 
@@ -313,12 +333,13 @@ public sealed class XcpDecoder
                 if (d.Length >= 2)
                     return new FrameAnnotation($"{kind} (DAQ #{d[1]}|ODT #{pid})", comment, group);
                 break;
-            default: // 2 and 3: relative ODT number + absolute DAQ list number (word)
+            case 2: // relative ODT number + absolute DAQ list number (word): [PID][DAQ word]
                 if (d.Length >= 3)
-                {
-                    int daqW = new Rd(d, _bigEndian).U16(1);
-                    return new FrameAnnotation($"{kind} (DAQ #{daqW}|ODT #{pid})", comment, group);
-                }
+                    return new FrameAnnotation($"{kind} (DAQ #{new Rd(d, _bigEndian).U16(1)}|ODT #{pid})", comment, group);
+                break;
+            default: // 3: the same, word-aligned — [PID][FILL][DAQ word], so the word is at 2
+                if (d.Length >= 4)
+                    return new FrameAnnotation($"{kind} (DAQ #{new Rd(d, _bigEndian).U16(2)}|ODT #{pid})", comment, group);
                 break;
         }
 

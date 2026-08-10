@@ -47,6 +47,11 @@ public sealed class MessageHub
     {
         lock (_lock)
         {
+            // Wiping the slots as well as the indices. Resetting _count alone hides the frames
+            // from every reader but keeps the whole ring — up to 200,000 frames and their
+            // payloads — reachable from this array, so the memory Clear is expected to give
+            // back was still held until the ring wrapped all the way round again.
+            Array.Clear(_ring);
             _head = 0;
             _count = 0;
         }

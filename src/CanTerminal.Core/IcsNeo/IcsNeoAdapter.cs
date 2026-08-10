@@ -117,9 +117,10 @@ public sealed class IcsNeoAdapter : ICanAdapter
         if (_rxThread is { } rx && !rx.Join(3000))
         {
             // The RX thread is stuck inside the driver; freeing the handle under it
-            // risks a native crash, so leak the handle instead.
+            // risks a native crash, so leak the handle instead. Still taken under the
+            // TX lock: clearing the field is what stops a later Send using it.
             ErrorOccurred?.Invoke("RX thread did not stop in time — leaking device handle.");
-            _handle = IntPtr.Zero;
+            lock (_txLock) _handle = IntPtr.Zero;
             _rxThread = null;
             Channels = [];
             return;
@@ -129,13 +130,25 @@ public sealed class IcsNeoAdapter : ICanAdapter
         Channels = [];
     }
 
+    /// <summary>
+    /// Releases the device handle. Held under <see cref="_txLock"/> for the same reason the RX
+    /// thread is joined first: a transmit that is already inside icsneoTxMessages must finish
+    /// before the handle it is using goes away. Send reaches this class from thread-pool threads
+    /// — the TCP API and the MCP server both call it without touching the dispatcher — so
+    /// "the user pressed Disconnect" and "a frame is being sent" genuinely overlap, and freeing
+    /// the handle underneath a live call is an access violation that takes the whole capture
+    /// down with it.
+    /// </summary>
     private void CloseHandle()
     {
-        if (_handle == IntPtr.Zero) return;
-        int errors = 0;
-        icsneoClosePort(_handle, ref errors);
-        icsneoFreeObject(_handle);
-        _handle = IntPtr.Zero;
+        lock (_txLock)
+        {
+            if (_handle == IntPtr.Zero) return;
+            int errors = 0;
+            icsneoClosePort(_handle, ref errors);
+            icsneoFreeObject(_handle);
+            _handle = IntPtr.Zero;
+        }
     }
 
     public unsafe void Send(string channel, uint arbId, byte[] data, bool extended = false, bool fd = false, bool brs = false, string? source = null)
@@ -143,7 +156,7 @@ public sealed class IcsNeoAdapter : ICanAdapter
         if (!IsOpen) throw new InvalidOperationException("Device not open.");
         if (!_channelToNetId.TryGetValue(channel.ToUpperInvariant(), out byte netId))
             throw new ArgumentException($"Channel '{channel}' not configured.");
-        if (data.Length > (fd ? 64 : 8)) throw new ArgumentException($"Data too long ({data.Length}).");
+        CanFrame.ValidatePayload(data, fd);
 
         var msg = new IcsSpyMessage
         {
@@ -206,6 +219,10 @@ public sealed class IcsNeoAdapter : ICanAdapter
                 // poll GetMessages even on wait timeout: error events are only surfaced here
                 int count = 0, errors = 0;
                 if (icsneoGetMessages(_handle, buffer, ref count, ref errors) == 0) continue;
+                // The buffer is exactly MaxRxBuffer long because that is what the driver
+                // documents it will fill. Trusting the returned count without saying so is how
+                // a driver change becomes silent memory corruption instead of a dropped frame.
+                if (count > MaxRxBuffer) count = MaxRxBuffer;
 
                 for (int i = 0; i < count; i++)
                 {

@@ -34,7 +34,7 @@ dotnet build CanTerminal.slnx
 | **Bus** | Refresh devices (`F5`) · Device ▸ · Channels… (`Ctrl+Shift+C`) · Bitrate ▸ · CAN FD ▸ · Connect (`F9`) / Disconnect (`Shift+F9`) |
 | **View** | Layout ▸ (`Ctrl+1/2/3`, XCP split `Ctrl+4`) · Pane A ▸ / Pane B ▸ · Text size ▸ (`Ctrl+±`, `Ctrl+0`, Ctrl+휠) · Timestamps ▸ · Highlight changes · Jump to newest (`End`) · History size… · Pause display (`F7`) · Clear all (`Ctrl+L`) |
 | **Transmit** | Send frame (`Ctrl+Enter`) · Start/Stop cyclic TX (`F6` / `Shift+F6`) · Cycle time… · TX channel ▸ · Extended ID / CAN FD frame / Bit rate switch |
-| **Profile** | None / XCP on CAN · Set IDs on channel… · Remove session on channel ▸ · Detect all from capture · Load IDs from A2L… · Show XCP IDs only |
+| **Profile** | None / XCP on CAN · Set IDs on channel… · Remove session on channel ▸ · Load IDs from A2L… · Show XCP IDs only |
 | **Tools** | API server · API server port… · Copy python snippet |
 | **Help** | Keyboard shortcuts (`Ctrl+/`) · README on GitHub · About |
 
@@ -308,13 +308,16 @@ port1/port2를 (CAN ID 쌍이 다른) 동시에 디코딩할 수 있습니다.
 DAQ-DTO의 PID는 `ALLOC_DAQ`/`ALLOC_ODT` 시퀀스를 따라가야 DAQ/ODT 번호로 풀립니다.
 바이트 순서도 CONNECT 응답의 `COMM_MODE_BASIC`을 따릅니다.
 
-**CAN ID 지정 방법 3가지:**
+**CAN ID 지정 방법 2가지:**
 
 | 방법 | 동작 | 한계 |
 |---|---|---|
 | **Set IDs on channel…** | 채널을 고르고 req/rsp를 hex로 입력 (`Remove session on channel ▸`로 해제). 채널을 바꾸면 그 채널에 이미 설정된 ID 쌍이 다이얼로그에 다시 뜹니다 | — |
-| **Detect all from capture** | 캡처된 트래픽에서 CONNECT / GET_SLAVE_ID 교환을 찾아 **모든 채널을 한 번에** 설정 (버스에 아무것도 송신하지 않음) | 캡처 안에 명령/응답 쌍이 있어야 함. 이미 돌고 있는 세션에 중간 접속하면 못 찾음 |
 | **Load IDs from A2L…** | `IF_DATA XCP_ON_CAN`의 `CAN_ID_MASTER`/`CAN_ID_SLAVE`를 읽음. **여러 파일 선택 가능** — 파일명 순서대로 열린 채널에 배정하고 결과를 표로 보여줌 | A2L이 CAN 전송 계층을 기술해야 함 |
+
+> 캡처 트래픽에서 ID 쌍을 자동으로 추측하는 기능은 없습니다. 명령/응답처럼 보이는 조합은
+> 평범한 주기 트래픽에도 흔해서, 근거가 약한 후보가 진짜 CONNECT 교환을 이기는 일이
+> 실제로 일어납니다. ID는 A2L에서 읽거나 직접 입력하는 편이 정확합니다.
 
 예를 들어 `xcp_daq2x4_p1.a2l`과 `_p2.a2l`을 함께 고르면 p1 → CAN1, p2 → CAN2로 배정되고,
 어떤 파일이 어느 채널에 갔는지 확인 창이 뜹니다 (배정을 조용히 틀리면 안 되므로).
@@ -413,7 +416,18 @@ Claude Code에서 다음 도구를 사용할 수 있습니다:
 python tests/smoke_test.py
 ```
 
-하드웨어 없이 가상 버스로 TCP API 10항목 + MCP 10항목을 검증합니다 (전부 PASS 상태로 커밋됨).
+하드웨어 없이 가상 버스로 TCP API 11항목 + XCP 프로파일 10항목 + MCP 10항목을 종단간 검증합니다.
+Debug 출력이 실행 중인 MCP 서버에 잠겨 있으면 `CANTERMINAL_CONFIG=Release`로 릴리스 바이너리를
+대신 씁니다.
+
+```bash
+dotnet run --project tests/CanTerminal.RegressionTests
+```
+
+리뷰에서 나온 결함들의 회귀 테스트입니다 — 링 버퍼 인덱스, 페이로드 길이 제한, `Clear` 후
+메모리 해제, DBC 짧은 프레임 억제, XCP 디코더 3건. 각 항목은 수정 전에 실제로 실패하던
+것이라 일반적인 건강 검진이 아니라 구체적으로 무엇이 잘못됐었는지를 기록합니다.
+전부 PASS 상태로 커밋됩니다.
 
 ## 하드웨어 검증 상태
 
@@ -430,6 +444,10 @@ ValueCAN 4-2 실물로 검증 완료: 장치 인식/오픈, 500kbps 설정, CAN1
 - ms 단위 타이밍이 빡빡한 테스트(ISO-TP flow control 등)는 로컬 TCP 경유 지터의 영향을 받을 수 있음.
 - DBC 디코딩은 classic CAN(≤8바이트) 신호만. 멀티플렉스 메시지는 활성 mux 그룹의 신호만 디코딩
   (extended multiplexing은 제외). FD(>8바이트) 프레임은 메시지 이름만 표시.
+- **DBC가 선언한 길이보다 짧은 프레임이 오면, 페이로드를 벗어나는 신호는 값을 표시하지 않고
+  `[N signal(s) past the 7-byte payload]`로 몇 개가 빠졌는지 알립니다.** 예전에는 없는 바이트를
+  0으로 읽어 숫자를 만들어냈는데, 경계에 걸친 신호는 의심스러운 0조차 아닌 그럴듯한 오답이
+  나와서 실제 측정값과 구분할 수 없었습니다.
 - Pause는 표시만 멈추며, 일시정지 중 프레임은 재개 후 화면에 나타나지 않음 (`recent`/API로는 조회 가능).
 - 디코딩(DBC/프로파일)은 프레임 수신 시점에 1회 수행되어 붙습니다. 따라서 DBC나 XCP 프로파일을
   나중에 적용하면 **이후 프레임부터** 디코딩됩니다 (이미 캡처된 프레임은 소급 적용되지 않음).

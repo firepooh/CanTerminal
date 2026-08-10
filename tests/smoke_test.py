@@ -5,6 +5,9 @@ Launches the headless harness (virtual bus + TCP API server), then exercises:
   2. the MCP stdio server (initialize / tools/list / tools/call)
 
 Run:  python tests/smoke_test.py   (from the repo root, after dotnet build)
+
+Set CANTERMINAL_CONFIG=Release to test the release binaries instead — useful when a running
+MCP server is holding the Debug output open.
 """
 
 import json
@@ -19,9 +22,10 @@ sys.path.insert(0, os.path.join(ROOT, "python"))
 from canterminal_can import CanTerminalClient, CanTerminalError  # noqa: E402
 
 PORT = 39999
-HARNESS = os.path.join(ROOT, "tests", "CanTerminal.SmokeTest", "bin", "Debug",
+CONFIG = os.environ.get("CANTERMINAL_CONFIG", "Debug")
+HARNESS = os.path.join(ROOT, "tests", "CanTerminal.SmokeTest", "bin", CONFIG,
                        "net10.0", "CanTerminal.SmokeTest.exe")
-MCP_DLL = os.path.join(ROOT, "src", "CanTerminal.Mcp", "bin", "Debug",
+MCP_DLL = os.path.join(ROOT, "src", "CanTerminal.Mcp", "bin", CONFIG,
                        "net10.0", "CanTerminal.Mcp.dll")
 
 failures = []

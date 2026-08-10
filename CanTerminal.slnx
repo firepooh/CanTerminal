@@ -5,6 +5,7 @@
     <Project Path="src/CanTerminal.Mcp/CanTerminal.Mcp.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/CanTerminal.RegressionTests/CanTerminal.RegressionTests.csproj" />
     <Project Path="tests/CanTerminal.SmokeTest/CanTerminal.SmokeTest.csproj" />
   </Folder>
 </Solution>

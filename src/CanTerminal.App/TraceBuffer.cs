@@ -93,7 +93,13 @@ public sealed class TraceBuffer : IList, INotifyCollectionChanged
         // Fall back to Reset when a granular batch would be the more expensive of the two, or
         // when Add stopped recording the evicted rows because the batch had already grown past
         // the point of being worth reporting one by one.
-        if (added > GranularLimit || _evictedRows.Count < evicted)
+        //
+        // added >= _count is the third case and it is not an optimisation: a batch at least as
+        // large as the buffer has overwritten every row, so "_count - added" — the index the
+        // tail loop starts from — is zero or negative. Reset is also what such a batch means.
+        // Only reachable below a 512-row history, because a larger batch is caught by the first
+        // test; History size… accepts 100, so it was reachable.
+        if (added > GranularLimit || added >= _count || _evictedRows.Count < evicted)
         {
             _evictedRows.Clear();
             Reset();
@@ -202,9 +208,14 @@ public sealed class TraceBuffer : IList, INotifyCollectionChanged
 
     public bool Contains(object? value) => IndexOf(value) >= 0;
 
+    /// <summary>
+    /// Backwards, deliberately. The one caller that matters is ScrollIntoView on the newest row,
+    /// once per pane per UI tick; searching from the front made that the worst case every time,
+    /// and the scan grows with the history size the user picked.
+    /// </summary>
     public int IndexOf(object? value)
     {
-        for (int i = 0; i < _count; i++)
+        for (int i = _count - 1; i >= 0; i--)
             if (ReferenceEquals(_ring[(_start + i) % _ring.Length], value)) return i;
         return -1;
     }

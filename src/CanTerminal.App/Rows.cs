@@ -202,12 +202,20 @@ public sealed class TraceRow
     /// <summary>
     /// "1A 2B 3C". Formatted by hand into one buffer: this runs for every captured frame, and
     /// the LINQ + string.Join version allocated a string per byte on top of the result.
+    ///
+    /// The stack buffer is sized for a full CAN FD payload and no more. Adapters reject anything
+    /// longer (<see cref="CanFrame.ValidatePayload"/>), so the heap path below is unreachable
+    /// today — it exists because sizing a stackalloc from data that arrived over a socket is how
+    /// a formatter turns into a crash the moment some future adapter forgets to check.
     /// </summary>
     public static string FormatData(byte[] data)
     {
         if (data.Length == 0) return "";
+        int chars = (data.Length * 3) - 1;
+        Span<char> buffer = chars <= (CanFrame.MaxPayload(fd: true) * 3) - 1
+            ? stackalloc char[chars]
+            : new char[chars];
         const string Hex = "0123456789ABCDEF";
-        Span<char> buffer = stackalloc char[(data.Length * 3) - 1];
         int at = 0;
         for (int i = 0; i < data.Length; i++)
         {

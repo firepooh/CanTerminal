@@ -59,9 +59,14 @@ public sealed class TcpApiServer : IDisposable
     public void Start(int port = 29536)
     {
         if (_listener != null) return;
+        // Bind before publishing anything. Assigning _listener first would leave IsRunning
+        // reporting a server that never bound, and since Start returns early on a non-null
+        // listener, the port-in-use case could not even be retried.
+        var listener = new TcpListener(IPAddress.Loopback, port);
+        listener.Start();
+
         _cts = new CancellationTokenSource();
-        _listener = new TcpListener(IPAddress.Loopback, port);
-        _listener.Start();
+        _listener = listener;
         Port = port;
         _hub.FrameObserved += OnFrame;
         _ = AcceptLoop(_cts.Token);
@@ -75,6 +80,8 @@ public sealed class TcpApiServer : IDisposable
         _cts?.Cancel();
         _listener.Stop();
         _listener = null;
+        _cts?.Dispose();
+        _cts = null;
         lock (_clientsLock)
         {
             foreach (var c in _clients) { try { c.Tcp.Close(); } catch { } }
@@ -86,11 +93,32 @@ public sealed class TcpApiServer : IDisposable
     private async Task AcceptLoop(CancellationToken ct)
     {
         var listener = _listener!;
+        int consecutiveFailures = 0;
         while (!ct.IsCancellationRequested)
         {
             TcpClient tcp;
-            try { tcp = await listener.AcceptTcpClientAsync(ct).ConfigureAwait(false); }
-            catch { break; }
+            try
+            {
+                tcp = await listener.AcceptTcpClientAsync(ct).ConfigureAwait(false);
+                consecutiveFailures = 0;
+            }
+            catch (OperationCanceledException) { break; }
+            catch (ObjectDisposedException) { break; }   // Stop() closed the listener
+            catch (Exception ex)
+            {
+                // One client aborting its connection mid-handshake fails the accept, not the
+                // listener. Leaving the loop here used to retire the server for the rest of the
+                // session while the socket stayed bound — so clients still connected, then
+                // waited out their read timeout with no explanation anywhere.
+                if (++consecutiveFailures >= 10)
+                {
+                    Info?.Invoke($"API server stopped accepting after {consecutiveFailures} consecutive errors: {ex.Message}");
+                    break;
+                }
+                Info?.Invoke($"API server: accept failed ({ex.Message}) — still listening.");
+                try { await Task.Delay(50, ct).ConfigureAwait(false); } catch { break; }
+                continue;
+            }
 
             tcp.NoDelay = true;
             var client = new Client

@@ -66,13 +66,42 @@
                   ToolTip="Running: the view follows the newest row. Pause (F7) to scroll back through what was captured.">
             <!-- A neutral wash on the answering side, so a command and its response read as a
                  pair. Bound OneTime off a precomputed brush rather than driven by a trigger —
-                 see TraceRow.SenderBrush. Transparent when no protocol names a sender. -->
-            <!-- No BasedOn: the theme style still supplies every property this one leaves
-                 alone, including the template, and {StaticResource {x:Type ListViewItem}} does
-                 not resolve here. -->
+                 see TraceRow.SenderBrush. Transparent when no protocol names a sender.
+
+                 The template is spelled out because the theme's selected row defeats both of the
+                 things this view colours. Its selection fill is dark enough to drop the sender
+                 inks from the 5:1 they were chosen for to about 3.7:1 (measured), and it paints
+                 over the slave wash, so selecting a row loses the pairing cue. A near-white tint
+                 plus a border marks the selection just as clearly and keeps master at 4.7:1 and
+                 slave at 4.5:1. Done here rather than with a per-cell IsSelected trigger: that
+                 would add two ancestor-walking bindings to every coloured cell of every realised
+                 row, which is the per-cell binding cost the rest of this file exists to avoid. -->
             <ListView.ItemContainerStyle>
                 <Style TargetType="ListViewItem">
                     <Setter Property="Background" Value="{Binding RowBackground, Mode=OneTime}"/>
+                    <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                    <Setter Property="Template">
+                        <Setter.Value>
+                            <ControlTemplate TargetType="ListViewItem">
+                                <Border x:Name="Bd" Background="{TemplateBinding Background}"
+                                        BorderBrush="Transparent" BorderThickness="0,1"
+                                        SnapsToDevicePixels="True">
+                                    <GridViewRowPresenter Columns="{TemplateBinding GridView.ColumnCollection}"
+                                                          Content="{TemplateBinding Content}"
+                                                          SnapsToDevicePixels="{TemplateBinding SnapsToDevicePixels}"/>
+                                </Border>
+                                <ControlTemplate.Triggers>
+                                    <Trigger Property="IsMouseOver" Value="True">
+                                        <Setter TargetName="Bd" Property="BorderBrush" Value="#D6E4F2"/>
+                                    </Trigger>
+                                    <Trigger Property="IsSelected" Value="True">
+                                        <Setter TargetName="Bd" Property="Background" Value="#EAF3FD"/>
+                                        <Setter TargetName="Bd" Property="BorderBrush" Value="#2C6FB5"/>
+                                    </Trigger>
+                                </ControlTemplate.Triggers>
+                            </ControlTemplate>
+                        </Setter.Value>
+                    </Setter>
                 </Style>
             </ListView.ItemContainerStyle>
             <!-- Every column binds OneTime. A TraceRow is an immutable snapshot, but WPF cannot
