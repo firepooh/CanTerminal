@@ -157,6 +157,11 @@
                 <MenuItem x:Name="MenuRecentDbc" Header="_Recent DBC" SubmenuOpened="RecentDbcMenu_Opened">
                     <MenuItem Header="(none)" IsEnabled="False"/>
                 </MenuItem>
+                <MenuItem x:Name="MenuUnloadDbcChannel" Header="Unload DBC on ch_annel"
+                          SubmenuOpened="UnloadDbcChannelMenu_Opened"
+                          ToolTip="Drop the database bound to one channel, leaving the others alone.">
+                    <MenuItem Header="(none)" IsEnabled="False"/>
+                </MenuItem>
                 <MenuItem x:Name="MenuUnloadDbc" Header="_Unload DBC" Click="UnloadDbc_Click"/>
                 <Separator/>
                 <MenuItem Header="_Save trace as CSV…" Command="{x:Static local:AppCommands.SaveCsv}"/>

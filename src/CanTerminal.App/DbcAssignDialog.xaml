@@ -1,0 +1,24 @@
+<Window x:Class="CanTerminal.App.DbcAssignDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Assign DBC to channels" Width="560" SizeToContent="Height" ResizeMode="NoResize"
+        ShowInTaskbar="False" WindowStartupLocation="CenterOwner">
+    <StackPanel Margin="16">
+        <TextBlock TextWrapping="Wrap" Foreground="#5E6B78" FontSize="11.5" Margin="0,0,0,12"
+                   Text="Which channel each database describes. Two ports commonly run the same protocol on different identifiers, so the pairing matters: bound to the wrong channel a database either decodes nothing, or — where the two buses share an identifier — decodes it as the wrong message. Neither is announced."/>
+
+        <Grid x:Name="Rows">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+        </Grid>
+
+        <TextBlock x:Name="HintText" Margin="0,10,0,0" Foreground="#5E6B78" TextWrapping="Wrap" FontSize="11.5"/>
+
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,16,0,0">
+            <Button Content="OK" IsDefault="True" Width="80" Padding="0,4" Click="Ok_Click"/>
+            <Button Content="Cancel" IsCancel="True" Width="80" Padding="0,4" Margin="8,0,0,0"/>
+        </StackPanel>
+    </StackPanel>
+</Window>

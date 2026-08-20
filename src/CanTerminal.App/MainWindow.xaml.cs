@@ -284,6 +284,7 @@ public partial class MainWindow : Window
         PeriodicButton.IsEnabled = connected;   // Send is driven by the command's CanExecute
         MenuDevice.IsEnabled = MenuBitrate.IsEnabled = MenuFd.IsEnabled = !connected && !offline;
         MenuUnloadDbc.IsEnabled = _dbc.IsLoaded || _channelDbc.Count > 0;
+        MenuUnloadDbcChannel.IsEnabled = _channelDbc.Count > 0;
         MenuCloseLog.IsEnabled = offline;
         MenuPaneB.IsEnabled = _layout != 0;
 
@@ -1530,13 +1531,37 @@ public partial class MainWindow : Window
 
     private void LoadDbc_Executed(object sender, ExecutedRoutedEventArgs e)
     {
-        // Several files bind one per channel. Two ports of the same device commonly run the same
-        // protocol on different identifiers, and one database cannot describe both.
         var dlg = new OpenFileDialog { Filter = "DBC files (*.dbc)|*.dbc|All files|*.*", Multiselect = true };
         if (dlg.ShowDialog(this) != true) return;
-        if (dlg.FileNames.Length == 1) LoadDbc(dlg.FileNames[0]);
-        else LoadDbcPerChannel(dlg.FileNames);
+
+        var channels = AvailableChannels();
+
+        // With one channel there is nothing to choose: "all channels" and that channel are the
+        // same database. Asking anyway would be a dialog whose every answer is identical.
+        if (channels.Count < 2 && dlg.FileNames.Length == 1)
+        {
+            LoadDbc(dlg.FileNames[0]);
+            return;
+        }
+
+        // Filename order is offered as the starting point, because a matched pair is usually
+        // named for its ports — but it is a suggestion in a dialog, not a rule applied silently.
+        var byName = dlg.FileNames.OrderBy(Path.GetFileName, StringComparer.OrdinalIgnoreCase).ToList();
+        var suggested = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+        for (int i = 0; i < byName.Count; i++)
+            suggested[byName[i]] = byName.Count == 1 ? CurrentChannelOf(byName[i])
+                                 : i < channels.Count ? channels[i]
+                                 : null;
+
+        var assignments = DbcAssignDialog.Ask(this, byName, channels, suggested);
+        if (assignments is null) return;
+        ApplyDbcAssignments(assignments);
     }
+
+    /// <summary>The channel a database is already bound to, so reloading it keeps its place.</summary>
+    private string? CurrentChannelOf(string path) =>
+        _channelDbc.FirstOrDefault(kv =>
+            string.Equals(kv.Value.FilePath, path, StringComparison.OrdinalIgnoreCase)).Key;
 
     private void LoadDbc(string path)
     {
@@ -1554,25 +1579,36 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// Binds one database per channel, in filename order — the rule the A2L loader already uses,
-    /// so a p1/p2 pair lands on the ports in the obvious order. The mapping is always shown:
-    /// getting it silently the wrong way round decodes every frame against the wrong database and
-    /// still looks entirely plausible.
+    /// Applies what the assignment dialog agreed: a null channel is the shared database, anything
+    /// else replaces whatever that channel had.
     /// </summary>
-    private void LoadDbcPerChannel(IReadOnlyList<string> paths)
+    private void ApplyDbcAssignments(IReadOnlyList<(string Path, string? Channel)> assignments)
     {
-        var files = paths.OrderBy(Path.GetFileName, StringComparer.OrdinalIgnoreCase).ToList();
-        var targets = AvailableChannels();
         var lines = new List<string>();
         try
         {
-            for (int i = 0; i < files.Count && i < targets.Count; i++)
+            foreach (var (path, channel) in assignments)
             {
                 var decoder = new DbcDecoder();
-                decoder.Load(files[i]);
-                _channelDbc[targets[i]] = decoder;
-                _settings.PushRecentDbc(files[i]);
-                lines.Add($"  {Path.GetFileName(files[i])}  →  {targets[i]}");
+                decoder.Load(path);
+                _settings.PushRecentDbc(path);
+
+                if (channel is null)
+                {
+                    _dbc.Load(path);
+                    lines.Add($"  {Path.GetFileName(path)}  →  all channels");
+                }
+                else
+                {
+                    // A file moved from one channel to another must not stay on the old one.
+                    foreach (var stale in _channelDbc
+                        .Where(kv => string.Equals(kv.Value.FilePath, path, StringComparison.OrdinalIgnoreCase))
+                        .Select(kv => kv.Key).ToList())
+                        _channelDbc.Remove(stale);
+
+                    _channelDbc[channel] = decoder;
+                    lines.Add($"  {Path.GetFileName(path)}  →  {channel}");
+                }
             }
         }
         catch (Exception ex)
@@ -1582,12 +1618,9 @@ public partial class MainWindow : Window
         }
         _annotator.ChannelDbc = _channelDbc;
 
-        int spare = files.Count - Math.Min(files.Count, targets.Count);
-        MessageBox.Show(this,
-            $"Bound {lines.Count} database(s) to channels:\n\n{string.Join("\n", lines)}" +
-            (spare > 0 ? $"\n\n{spare} file(s) had no channel to go to." : ""),
-            "Load DBC", MessageBoxButton.OK, MessageBoxImage.Information);
-        InfoText.Text = $"{lines.Count} DBC file(s) bound per channel.";
+        InfoText.Text = lines.Count == 1
+            ? $"DBC bound: {lines[0].Trim()}"
+            : $"{lines.Count} DBC file(s) bound: {string.Join(",  ", lines.Select(l => l.Trim()))}";
         AfterDbcChanged();
     }
 
@@ -1600,6 +1633,25 @@ public partial class MainWindow : Window
             ? "DBC unloaded — frames captured from here on carry no signal comments."
             : "DBC unloaded — the log has been read again without it.";
         AfterDbcChanged();
+    }
+
+    /// <summary>
+    /// Drops the database bound to one channel, leaving the others alone. Filled on open, like the
+    /// other per-channel submenus.
+    /// </summary>
+    private void UnloadDbcChannelMenu_Opened(object sender, RoutedEventArgs e)
+    {
+        var bound = _channelDbc.Keys.OrderBy(ChannelPalette.Index).ToList();
+        FillRadioMenu(MenuUnloadDbcChannel, bound,
+                      c => $"{c}  {Path.GetFileName(_channelDbc[c].FilePath)}",
+                      _ => false,
+                      c =>
+                      {
+                          _channelDbc.Remove(c);
+                          _annotator.ChannelDbc = _channelDbc;
+                          InfoText.Text = $"DBC on {c} unloaded.";
+                          AfterDbcChanged();
+                      });
     }
 
     /// <summary>

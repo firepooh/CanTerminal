@@ -33,7 +33,7 @@ dotnet build CanTerminal.slnx
 
 | 메뉴 | 내용 |
 |---|---|
-| **File** | Open log… (`Ctrl+O`) · Recent logs ▸ · Close log · Load DBC… (`Ctrl+D`, 여러 개 고르면 채널별) · Recent DBC ▸ (최근 9개) · Unload DBC · Save trace as CSV… (`Ctrl+S`) |
+| **File** | Open log… (`Ctrl+O`) · Recent logs ▸ · Close log · Load DBC… (`Ctrl+D`, 채널 배정) · Recent DBC ▸ (최근 9개) · Unload DBC on channel ▸ · Unload DBC · Save trace as CSV… (`Ctrl+S`) |
 | **Bus** | Refresh devices (`F5`) · Device ▸ · Channels… (`Ctrl+Shift+C`) · Bitrate ▸ · CAN FD ▸ · Connect (`F9`) / Disconnect (`Shift+F9`) |
 | **View** | Layout ▸ (`Ctrl+1/2/3`, XCP split `Ctrl+4`) · Pane A ▸ / Pane B ▸ · Text size ▸ (`Ctrl+±`, `Ctrl+0`, Ctrl+휠) · Timestamps ▸ · Highlight changes · Go to time… (`Ctrl+G`) · Jump to newest (`End`) · History size… · Pause display (`F7`) · Clear all (`Ctrl+L`) |
 | **Transmit** | Send frame (`Ctrl+Enter`) · Start/Stop cyclic TX (`F6` / `Shift+F6`) · Cycle time… · TX channel ▸ · Extended ID / CAN FD frame / Bit rate switch |
@@ -260,7 +260,7 @@ CSV 저장에는 모든 프레임이 그대로 있습니다.
 | 재생 | 툴바 위 전송 바 — Play/Pause (`F7`), ⏮, 배속, 탐색 슬라이더 |
 | 채널 골라 보기 | 패널 헤더의 `Channel` 콤보에 파일의 채널이 올라옵니다 (`All` / `CAN1` / `CAN2` …). 분할 레이아웃이면 패널 B가 두 번째 채널로 열립니다 |
 | 시간 이동 | `View ▸ Go to time…` (`Ctrl+G`) — 파일 자체 시계 기준 초 |
-| DBC | `File ▸ Load DBC…`에서 **여러 파일 선택 시 채널별로 배정** (파일명 순서, 배정 결과를 표로 확인) |
+| DBC | `File ▸ Load DBC…` — 파일을 고르면 **어느 채널에 붙일지 직접 배정**합니다 |
 | XCP | `Profile ▸`의 모든 항목이 그대로 동작하며 **파일 전체에 소급 적용** |
 
 ### 재생 — 파일에도 시계가 있습니다
@@ -318,13 +318,30 @@ Clear를 막는 이유는 반사적으로 눌리는 버튼이라 수 초 걸린 
 CANoe DB export는 ID와 방향 사이에 심볼릭 메시지 이름을 넣는데, 컬럼을 세는 파서는 그런
 파일의 프레임을 **한 마디 없이 전부** 잃습니다.
 
-### 채널별 DBC
+### 채널별 DBC — 어디에 붙일지 직접 고릅니다
 
-사용자 파이프라인이 그렇듯 포트마다 다른 데이터베이스를 쓰는 경우가 흔합니다
-(CAN1→`p1.dbc`, CAN2→`p2.dbc`). `Load DBC…`에서 여러 파일을 고르면 파일명 순서로 채널에
-배정하고 **어느 파일이 어느 채널에 갔는지 표로 확인**합니다 — 조용히 뒤바뀌면 모든 프레임이
-엉뚱한 데이터베이스로 디코딩되면서도 그럴듯해 보이기 때문입니다. 한 개만 고르면 종전대로
-전 채널 공용입니다.
+포트마다 다른 데이터베이스를 쓰는 경우가 흔합니다 (CAN1→`p1.dbc`, CAN2→`p2.dbc`).
+`Load DBC…`에서 파일을 고르면 배정 창이 뜹니다:
+
+```
+xcp_daq_p1.dbc     [ CAN1 ▾ ]
+xcp_daq_p2.dbc     [ CAN2 ▾ ]
+```
+
+각 줄의 콤보에서 `All channels` / `CAN1` / `CAN2` … 중 고릅니다. 파일명 순서로 **미리 채워
+두지만 그건 제안일 뿐**이고, 바꾸면 그대로 따릅니다. 파일 하나만 골라 `CAN2`에만 붙이는 것도
+됩니다 — 다른 채널의 기존 배정은 건드리지 않습니다.
+
+한 채널에 두 파일을 배정하거나 `All channels`를 두 개 고르면 거절합니다. 조용히 덮어쓰면
+진 파일이 "로드됨"으로 남아 있게 됩니다.
+
+**왜 묻는가** — 잘못 묶으면 두 가지 중 하나가 됩니다. 두 버스가 서로 다른 ID를 쓰면
+**아무것도 디코딩되지 않고**(예제 파일이 이 경우입니다), 같은 ID를 공유하면 **엉뚱한 메시지로
+디코딩됩니다.** 둘 다 아무 경고 없이 일어납니다. 파일명 순서로 추측하는 건 짝이 맞을 때만
+맞는 규칙이었습니다.
+
+이미 배정된 파일을 다시 고르면 **옮겨집니다** — 예전 채널에 남지 않습니다.
+채널 하나만 해제하려면 `File ▸ Unload DBC on channel ▸`, 전부 지우려면 `Unload DBC`입니다.
 
 ### 로그에서는 XCP가 처음부터 재생됩니다
 
