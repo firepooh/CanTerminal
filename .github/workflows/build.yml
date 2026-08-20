@@ -17,13 +17,13 @@ jobs:
   build:
     runs-on: windows-latest    # WPF 앱이라 Windows 러너가 필요하다
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: 10.0.x
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
 
@@ -100,8 +100,12 @@ jobs:
             Copy-Item "$appDir/CanTerminal.exe" $stage
             Copy-Item "$mcpDir/CanTerminal.Mcp.exe" $stage
             Copy-Item 'README.md', 'LICENSE', 'THIRD-PARTY-NOTICES.md' $stage
-            # 파이썬 테스트에서 쓰는 경량 클라이언트 (pip install -e python)
+            # 파이썬 테스트에서 쓰는 경량 클라이언트 (pip install -e python).
+            # __pycache__ 는 앞선 테스트 단계가 만든 것이고, 그 러너의 파이썬 버전에만
+            # 맞는 바이트코드라 배포본에 들어가면 안 된다.
             Copy-Item 'python' "$stage/python" -Recurse
+            Get-ChildItem "$stage/python" -Recurse -Directory -Filter '__pycache__' |
+              Remove-Item -Recurse -Force
             Compress-Archive -Path "$stage/*" -DestinationPath "dist/$name.zip"
           }
 
@@ -117,7 +121,7 @@ jobs:
           finally { $z.Dispose() }
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: CanTerminal-win-x64
           path: dist/*
