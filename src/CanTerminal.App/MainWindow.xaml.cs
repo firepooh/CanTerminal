@@ -6,9 +6,11 @@ using System.Text;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Media;
 using System.Windows.Threading;
 using CanTerminal.Core;
 using CanTerminal.Core.IcsNeo;
+using CanTerminal.Core.Logs;
 using CanTerminal.Core.Xcp;
 using Microsoft.Win32;
 
@@ -70,6 +72,23 @@ public partial class MainWindow : Window
     private DateTime _zeroWall = DateTime.Now;
     private bool _haveZero;
 
+    /// <summary>
+    /// The log file on screen, or null while this is a live monitor. Every offline decision hangs
+    /// off this one field rather than a mode flag sprinkled about, so the live path stays exactly
+    /// the code it was.
+    /// </summary>
+    private LogFile? _log;
+
+    /// <summary>Databases bound to one channel each; see <see cref="FrameAnnotator.ChannelDbc"/>.</summary>
+    private readonly Dictionary<string, DbcDecoder> _channelDbc = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Frame count past which opening a log is offered rather than done. Frame, annotation and
+    /// row together run to roughly half a kilobyte each, so a million is already most of a
+    /// gigabyte and the layout passes stop being instant.
+    /// </summary>
+    private const int LargeLogFrames = 1_000_000;
+
     private readonly DispatcherTimer _flushTimer;
     private readonly DispatcherTimer _statusTimer;
     private readonly DispatcherTimer _periodicTimer;
@@ -98,15 +117,19 @@ public partial class MainWindow : Window
                 if (a?.IsOpen != true) throw new InvalidOperationException("No device connected in CanTerminal.");
                 a.Send(channel, id, data, ext, fd, brs, source);
             },
-            StatusProvider = () => new ApiStatus(_adapter?.IsOpen == true, _adapter?.Name, _adapter?.Channels ?? [],
-                                                 _dbc.FilePath, _annotator.ProfileName),
+            StatusProvider = () => new ApiStatus(
+                _adapter?.IsOpen == true, _adapter?.Name,
+                _adapter?.Channels ?? _log?.Channels ?? [],
+                _dbc.FilePath, _annotator.ProfileName,
+                Mode: _log is null ? "live" : "log", LogPath: _log?.Path,
+                ChannelDbc: _channelDbc.Select(kv => $"{kv.Key}={Path.GetFileName(kv.Value.FilePath)}").ToArray()),
         };
         _server.Info += msg => Dispatcher.BeginInvoke(() => InfoText.Text = msg);
 
         _hub.FrameObserved += f => _pending.Enqueue(f);
 
-        PaneA.SelectionChanged += OnPaneSelectionChanged;
-        PaneB.SelectionChanged += OnPaneSelectionChanged;
+        PaneA.SelectionChanged += () => OnPaneSelectionChanged(PaneA);
+        PaneB.SelectionChanged += () => OnPaneSelectionChanged(PaneB);
         PaneA.ZoomRequested += ZoomText;
         PaneB.ZoomRequested += ZoomText;
 
@@ -256,11 +279,17 @@ public partial class MainWindow : Window
     private void UpdateMenuState()
     {
         bool connected = _adapter != null;
+        bool offline = _log is not null;
         MenuTransmit.IsEnabled = connected;
         PeriodicButton.IsEnabled = connected;   // Send is driven by the command's CanExecute
-        MenuDevice.IsEnabled = MenuBitrate.IsEnabled = MenuFd.IsEnabled = !connected;
-        MenuUnloadDbc.IsEnabled = _dbc.IsLoaded;
+        MenuDevice.IsEnabled = MenuBitrate.IsEnabled = MenuFd.IsEnabled = !connected && !offline;
+        MenuUnloadDbc.IsEnabled = _dbc.IsLoaded || _channelDbc.Count > 0;
+        MenuCloseLog.IsEnabled = offline;
         MenuPaneB.IsEnabled = _layout != 0;
+
+        // Both would lie about what the view is doing over a file: Pause claims it is following a
+        // bus, Clear offers to throw away a load with no way back.
+        MenuPause.IsEnabled = PauseButton.IsEnabled = !offline;
 
         bool xcp = IsXcpSelected;
         MenuXcpSet.IsEnabled = MenuXcpRemove.IsEnabled =
@@ -279,10 +308,18 @@ public partial class MainWindow : Window
     /// </summary>
     private void UpdateSummary()
     {
-        string channels = string.IsNullOrWhiteSpace(_channelsText) ? "CAN1" : _channelsText;
-        string speed = FormatBitrate(_bitrate) +
-                       (MenuFdEnabled.IsChecked ? $" + FD {FormatBitrate(_fdBitrate)}" : "");
-        string dbc = _dbc.IsLoaded ? Path.GetFileName(_dbc.FilePath!) : "no DBC";
+        // Over a file the bus settings describe nothing: the bitrate is whatever the recording was
+        // made at, which the file does not say, and the channels are the file's, not the boxes'.
+        string channels = _log is { } open
+            ? string.Join(",", open.Channels)
+            : string.IsNullOrWhiteSpace(_channelsText) ? "CAN1" : _channelsText;
+        string speed = _log is not null
+            ? "from file"
+            : FormatBitrate(_bitrate) + (MenuFdEnabled.IsChecked ? $" + FD {FormatBitrate(_fdBitrate)}" : "");
+        string dbc = _channelDbc.Count > 0
+            ? string.Join(" + ", _channelDbc.OrderBy(kv => ChannelPalette.Index(kv.Key))
+                                            .Select(kv => $"{kv.Key}:{Path.GetFileName(kv.Value.FilePath)}"))
+            : _dbc.IsLoaded ? Path.GetFileName(_dbc.FilePath!) : "no DBC";
         SummaryText.Text = $"{channels} · {speed} · {dbc} · Profile: {(IsXcpSelected ? "XCP" : "None")}";
     }
 
@@ -343,7 +380,8 @@ public partial class MainWindow : Window
 
     private void ConnectButton_Click(object sender, RoutedEventArgs e)
     {
-        if (_adapter != null) Disconnect();
+        if (_log is not null) CloseLog();
+        else if (_adapter != null) Disconnect();
         else Connect();
     }
 
@@ -444,6 +482,213 @@ public partial class MainWindow : Window
         UpdateMenuState();
     }
 
+    // ---------- log files ----------
+
+    private void OpenLog_Executed(object sender, ExecutedRoutedEventArgs e)
+    {
+        var dlg = new OpenFileDialog { Filter = LogReaders.DialogFilter };
+        if (dlg.ShowDialog(this) == true) OpenLog(dlg.FileName);
+    }
+
+    private void OpenLog(string path)
+    {
+        if (!File.Exists(path))
+        {
+            MessageBox.Show(this, $"{path}\n\nThe file is no longer there.",
+                            "Open log", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+        if (LogReaders.For(path) is not { } reader)
+        {
+            MessageBox.Show(this,
+                $"{Path.GetFileName(path)}\n\nThis build reads " +
+                $"{string.Join(", ", LogReaders.All.Select(r => r.Description))}. MDF4 is not supported yet.",
+                "Open log", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        // Warned before reading rather than after, because the cost being warned about is the
+        // read. About 56 bytes of text per frame in the files this was measured against.
+        long size = new FileInfo(path).Length;
+        long estimate = size / 56;
+        if (estimate > LargeLogFrames)
+        {
+            var proceed = MessageBox.Show(this,
+                $"{Path.GetFileName(path)} is {size / 1048576.0:N0} MB — very roughly {estimate:N0} frames, " +
+                $"needing on the order of {estimate * 500 / 1073741824.0:N1} GB.\n\nOpen it anyway?",
+                "Open log", MessageBoxButton.OKCancel, MessageBoxImage.Warning);
+            if (proceed != MessageBoxResult.OK) return;
+        }
+
+        // A live capture and a file cannot share the ring: one carries device timestamps and the
+        // other the file's, and interleaved neither reading means anything.
+        if (_adapter is not null)
+        {
+            var proceed = MessageBox.Show(this,
+                $"Opening {Path.GetFileName(path)} disconnects from {_adapter.Name} and discards " +
+                $"{_hub.TotalFrames:N0} captured frames.\n\nContinue?",
+                "Open log", MessageBoxButton.OKCancel, MessageBoxImage.Warning);
+            if (proceed != MessageBoxResult.OK) return;
+            Disconnect();
+        }
+
+        // Before anything is cleared: frames already queued for display would otherwise land in
+        // the log's panes and be read as part of the file. The ordering rule Clear documents.
+        while (_pending.TryDequeue(out _)) { }
+
+        var log = LogProgressDialog.Run(this, path, reader, _hub);
+        if (log is null) return;                       // cancelled, or already reported
+
+        if (log.Frames.Count == 0)
+        {
+            MessageBox.Show(this,
+                $"{Path.GetFileName(path)}\n\nNo frames were found." +
+                (log.SkippedLines > 0 ? $" {log.SkippedLines:N0} lines were not understood." : ""),
+                "Open log", MessageBoxButton.OK, MessageBoxImage.Warning);
+            _hub.Clear();
+            return;
+        }
+
+        _log = log;
+        _settings.PushRecentLog(path);
+        _displaySkipped = 0;
+
+        // The file's own clock, anchored on its header date. _haveZero is otherwise only reset by
+        // Clear, so without this a log opened after a live session hangs off the device's anchor.
+        _zeroTs = 0;
+        _zeroWall = log.StartWall ?? DateTime.Now;
+        _haveZero = true;
+
+        EnterLogMode();
+        ApplyTimeBase();
+        ApplyContentFilters();
+        ProjectToPanes();
+        UpdateMenuState();
+        UpdateSummary();
+        UpdateStatusBar();
+
+        InfoText.Text = $"{Path.GetFileName(path)} — {log.Frames.Count:N0} frames, " +
+                        $"{log.Duration:0.000} s, {string.Join(" + ", log.Channels)}" +
+                        (log.StartWallIsApproximate ? "  (start time approximate — this file is a continuation)" : "");
+        if (log.SkippedLines > 0) ReportSkippedLines(log);
+    }
+
+    /// <summary>
+    /// Says what the reader could not read.
+    ///
+    /// A text log fails by matching fewer lines, not by raising anything, so this count is the
+    /// whole difference between "the file held no error frames" and "the parser cannot see error
+    /// frames". Worth a dialog, and it stays in the status bar afterwards.
+    /// </summary>
+    private void ReportSkippedLines(LogFile log)
+    {
+        string shapes = string.Join("\n", log.SkippedByShape
+            .OrderByDescending(kv => kv.Value)
+            .Select(kv => $"    {kv.Value,9:N0}  {kv.Key}"));
+        string samples = string.Join("\n", log.SkippedSamples.Take(6).Select(l => "    " + l.Trim()));
+        MessageBox.Show(this,
+            $"{log.SkippedLines:N0} of the lines in {Path.GetFileName(log.Path)} were not understood, " +
+            $"and are not in the trace.\n\n{shapes}\n\nFor example:\n{samples}",
+            "Open log", MessageBoxButton.OK, MessageBoxImage.Warning);
+    }
+
+    private void CloseLog_Click(object sender, RoutedEventArgs e) => CloseLog();
+
+    private void CloseLog()
+    {
+        if (_log is null) return;
+        _log = null;
+        _hub.Clear();
+        _hub.SetCapacity(200_000);                     // back to the live ring
+        _haveZero = false;
+        foreach (var pane in new[] { PaneA, PaneB })
+        {
+            pane.ClearAll();
+            pane.SetHistoryCapacity(_historyCapacity);   // back to the size the user chose
+        }
+        ExitLogMode();
+        ApplyTimeBase();
+        UpdateConnStatus();
+        UpdateMenuState();
+        UpdateSummary();
+        UpdateStatusBar();
+        InfoText.Text = "Log closed.";
+    }
+
+    /// <summary>
+    /// Dresses the window so a file can never be taken for a live bus.
+    ///
+    /// The amber is the one Pause already uses, deliberately: both states make the same claim —
+    /// that what is on screen has stopped tracking the bus. A second colour would only invite the
+    /// reader to work out what the difference meant.
+    /// </summary>
+    private void EnterLogMode()
+    {
+        ToolbarBar.Background = new SolidColorBrush(Color.FromRgb(0xFF, 0xE9, 0xA8));
+        ToolbarBar.BorderBrush = new SolidColorBrush(Color.FromRgb(0xD9, 0xA8, 0x1E));
+        ConnectButton.Content = "Close log";
+        Title = $"{Path.GetFileName(_log!.Path)} — log file (offline) — CanTerminal";
+    }
+
+    private void ExitLogMode()
+    {
+        ToolbarBar.ClearValue(Border.BackgroundProperty);
+        ToolbarBar.ClearValue(Border.BorderBrushProperty);
+        ConnectButton.Content = _adapter is null ? "Connect" : "Disconnect";
+        Title = "CanTerminal — ValueCAN Monitor";
+    }
+
+    private void RecentLogsMenu_Opened(object sender, RoutedEventArgs e) =>
+        FillRadioMenu(MenuRecentLogs, _settings.RecentLogs, p => p, _ => false, OpenLog);
+
+    /// <summary>
+    /// Rebuilds the panes from the hub. Used after a load, and after anything that changes how a
+    /// frame reads — a database, a protocol session, a pane's own filter.
+    /// </summary>
+    private void ProjectToPanes(ChannelPane? only = null)
+    {
+        var panes = only is null ? ActivePanes.ToArray() : [only];
+        var frames = _hub.Snapshot();
+        var previous = Mouse.OverrideCursor;
+        Mouse.OverrideCursor = Cursors.Wait;
+        try
+        {
+            // The trace buffer is a ring sized for a live capture, and a file is bigger than it.
+            // Left alone it would keep the newest rows and drop the rest — so opening a log would
+            // show its last fifty thousand frames while looking exactly like the whole file.
+            foreach (var pane in panes) pane.SetHistoryCapacity(Math.Max(TraceBuffer.MinCapacity, frames.Length));
+            foreach (var pane in panes) pane.ClearAll();
+            foreach (var frame in frames)
+                foreach (var pane in panes)
+                    if (pane.Accepts(frame)) pane.Append(frame, now: 0, highlight: false);
+            foreach (var pane in panes)
+            {
+                // The change highlight decays in wall time, so replaying eight minutes of bus in
+                // two seconds would light every aggregate row at once and fade them together —
+                // "everything just changed", which is not what happened.
+                pane.ClearHighlights();
+                pane.FinishProjection();
+            }
+        }
+        finally { Mouse.OverrideCursor = previous; }
+    }
+
+    /// <summary>
+    /// Re-reads the whole loaded capture: annotate again, then rebuild the panes.
+    ///
+    /// This is the thing a file can do that a live bus cannot. A protocol session configured
+    /// halfway through a capture only ever sees the rest of it; a file is replayed from its first
+    /// frame, so the commands that set the session up are decoded too and the readings that
+    /// depend on them come out right.
+    /// </summary>
+    private void ReplayFromHub()
+    {
+        if (_log is null) return;
+        _hub.Reannotate();
+        ApplyContentFilters();          // reads GroupKey, so it must follow the re-annotate
+        ProjectToPanes();
+    }
+
     // ---------- frame flow ----------
 
     private void FlushPending()
@@ -521,6 +766,22 @@ public partial class MainWindow : Window
 
     private void UpdateStatusBar()
     {
+        if (_log is { } log)
+        {
+            // A rate means nothing here. Differencing the totals of a file that finished loading
+            // shows one enormous spike and then zero for ever, which reads as a dead bus.
+            ConnStatusText.Text = $"LOG FILE — {Path.GetFileName(log.Path)}";
+            RateText.Text = $"{log.FirstTimestamp:0.000} – {log.LastTimestamp:0.000} s   ({log.Duration:0.000} s)";
+            TotalText.Text = $"{log.Frames.Count:N0} frames in file" +
+                (log.SkippedLines > 0 ? $"   ·   {log.SkippedLines:N0} lines not understood" : "");
+            ServerStatusText.Text = _server.IsRunning
+                ? $"API server: 127.0.0.1:{_server.Port} ({_server.ClientCount} clients)"
+                : "API server: off";
+            foreach (var pane in ActivePanes)
+                pane.UpdateStats($"{pane.TraceCount:N0} rows — log file");
+            return;
+        }
+
         long total = _hub.TotalFrames;
         var perChannel = _hub.ChannelTotals();
 
@@ -670,6 +931,14 @@ public partial class MainWindow : Window
                 ChannelPane.PaneContent.XcpData => f => (f.Annotation?.GroupKey ?? 0) > 0,
                 _ => null,
             });
+    }
+
+    private void OnPaneSelectionChanged(ChannelPane pane)
+    {
+        // The pane cleared itself because its basis changed; with a file behind it there is
+        // something to put back.
+        if (_log is not null) ProjectToPanes(pane);
+        OnPaneSelectionChanged();
     }
 
     private void OnPaneSelectionChanged()
@@ -840,13 +1109,17 @@ public partial class MainWindow : Window
             : "XCP  " + string.Join("    ", _xcpSessions
                 .OrderBy(kv => ChannelPalette.Index(kv.Key))
                 .Select(kv => $"{kv.Key} 0x{kv.Value.RequestId:X}/0x{kv.Value.ResponseId:X}"));
+
+        // Every session above is a fresh decoder, so re-reading the file is a single pass in
+        // capture order — exactly the condition a stateful decoder needs.
+        if (_log is not null) ReplayFromHub();
     }
 
     private void XcpSet_Click(object sender, RoutedEventArgs e)
     {
         var existing = _xcpSessions.ToDictionary(kv => kv.Key, kv => (kv.Value.RequestId, kv.Value.ResponseId),
                                                  StringComparer.OrdinalIgnoreCase);
-        var result = XcpSessionDialog.Ask(this, AvailableXcpChannels(), _xcpChannel, existing);
+        var result = XcpSessionDialog.Ask(this, AvailableChannels(), _xcpChannel, existing);
         if (result is null) return;
 
         _xcpChannel = result.Channel;
@@ -900,7 +1173,7 @@ public partial class MainWindow : Window
             // channels in order. The mapping is always reported so it can be checked.
             var targets = found.Count == 1
                 ? [SelectedXcpChannel()]
-                : AvailableXcpChannels().Take(found.Count).ToList();
+                : AvailableChannels().Take(found.Count).ToList();
 
             var lines = new List<string>();
             for (int i = 0; i < found.Count && i < targets.Count; i++)
@@ -926,10 +1199,16 @@ public partial class MainWindow : Window
         }
     }
 
-    private List<string> AvailableXcpChannels() => _adapter?.Channels.ToList() ?? ["CAN1"];
+    /// <summary>
+    /// Channels that can be targeted right now: the open device's, or the open log's. Without the
+    /// log arm a two-port capture read from a file could only ever be given one XCP session and
+    /// one database, which is half of what its own A2L and DBC pairs describe.
+    /// </summary>
+    private List<string> AvailableChannels() =>
+        _adapter?.Channels.ToList() ?? _log?.Channels.ToList() ?? ["CAN1"];
 
     private string SelectedXcpChannel() =>
-        _xcpChannel ?? AvailableXcpChannels().FirstOrDefault() ?? "CAN1";
+        _xcpChannel ?? AvailableChannels().FirstOrDefault() ?? "CAN1";
 
     private void XcpOnly_Changed(object sender, RoutedEventArgs e)
     {
@@ -940,9 +1219,33 @@ public partial class MainWindow : Window
         InfoText.Text = MenuXcpOnly.IsChecked
             ? "Showing XCP IDs only — other traffic is still captured, just not displayed."
             : "Showing all CAN IDs.";
+        if (_log is not null) ProjectToPanes();
     }
 
     // ---------- view ----------
+
+    private void GoToTime_Executed(object sender, ExecutedRoutedEventArgs e)
+    {
+        if (_log is not { } log) return;
+        string? entered = InputDialog.Ask(this, "Go to time", "Seconds on the log's own clock:",
+                                          log.FirstTimestamp.ToString("0.000"),
+                                          $"This file runs {log.FirstTimestamp:0.000} to {log.LastTimestamp:0.000} s.");
+        if (entered is null) return;
+        if (!double.TryParse(entered.Trim(), System.Globalization.NumberStyles.Float,
+                             System.Globalization.CultureInfo.InvariantCulture, out double seconds))
+        {
+            MessageBox.Show(this, $"'{entered}' is not a number of seconds.",
+                            "Go to time", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        // Each pane is asked separately: two panes filtered differently do not necessarily both
+        // hold a row at the same moment, and moving one is better than moving neither.
+        int missed = ActivePanes.Count(p => !p.ScrollToTime(seconds));
+        InfoText.Text = missed == 0
+            ? $"Moved to {seconds:0.000} s."
+            : $"Moved to {seconds:0.000} s — {missed} pane(s) hold nothing that late.";
+    }
 
     private void JumpToLive_Executed(object sender, ExecutedRoutedEventArgs e)
     {
@@ -1012,8 +1315,12 @@ public partial class MainWindow : Window
 
     private void LoadDbc_Executed(object sender, ExecutedRoutedEventArgs e)
     {
-        var dlg = new OpenFileDialog { Filter = "DBC files (*.dbc)|*.dbc|All files|*.*" };
-        if (dlg.ShowDialog(this) == true) LoadDbc(dlg.FileName);
+        // Several files bind one per channel. Two ports of the same device commonly run the same
+        // protocol on different identifiers, and one database cannot describe both.
+        var dlg = new OpenFileDialog { Filter = "DBC files (*.dbc)|*.dbc|All files|*.*", Multiselect = true };
+        if (dlg.ShowDialog(this) != true) return;
+        if (dlg.FileNames.Length == 1) LoadDbc(dlg.FileNames[0]);
+        else LoadDbcPerChannel(dlg.FileNames);
     }
 
     private void LoadDbc(string path)
@@ -1028,16 +1335,68 @@ public partial class MainWindow : Window
         {
             MessageBox.Show(this, ex.Message, "DBC load failed", MessageBoxButton.OK, MessageBoxImage.Error);
         }
-        UpdateMenuState();
-        UpdateSummary();
+        AfterDbcChanged();
+    }
+
+    /// <summary>
+    /// Binds one database per channel, in filename order — the rule the A2L loader already uses,
+    /// so a p1/p2 pair lands on the ports in the obvious order. The mapping is always shown:
+    /// getting it silently the wrong way round decodes every frame against the wrong database and
+    /// still looks entirely plausible.
+    /// </summary>
+    private void LoadDbcPerChannel(IReadOnlyList<string> paths)
+    {
+        var files = paths.OrderBy(Path.GetFileName, StringComparer.OrdinalIgnoreCase).ToList();
+        var targets = AvailableChannels();
+        var lines = new List<string>();
+        try
+        {
+            for (int i = 0; i < files.Count && i < targets.Count; i++)
+            {
+                var decoder = new DbcDecoder();
+                decoder.Load(files[i]);
+                _channelDbc[targets[i]] = decoder;
+                _settings.PushRecentDbc(files[i]);
+                lines.Add($"  {Path.GetFileName(files[i])}  →  {targets[i]}");
+            }
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, ex.Message, "DBC load failed", MessageBoxButton.OK, MessageBoxImage.Error);
+            return;
+        }
+        _annotator.ChannelDbc = _channelDbc;
+
+        int spare = files.Count - Math.Min(files.Count, targets.Count);
+        MessageBox.Show(this,
+            $"Bound {lines.Count} database(s) to channels:\n\n{string.Join("\n", lines)}" +
+            (spare > 0 ? $"\n\n{spare} file(s) had no channel to go to." : ""),
+            "Load DBC", MessageBoxButton.OK, MessageBoxImage.Information);
+        InfoText.Text = $"{lines.Count} DBC file(s) bound per channel.";
+        AfterDbcChanged();
     }
 
     private void UnloadDbc_Click(object sender, RoutedEventArgs e)
     {
         _dbc.Unload();
-        InfoText.Text = "DBC unloaded — frames captured from here on carry no signal comments.";
+        _channelDbc.Clear();
+        _annotator.ChannelDbc = _channelDbc;
+        InfoText.Text = _log is null
+            ? "DBC unloaded — frames captured from here on carry no signal comments."
+            : "DBC unloaded — the log has been read again without it.";
+        AfterDbcChanged();
+    }
+
+    /// <summary>
+    /// A loaded log is decoded again from its first frame, so a database applies to the whole file
+    /// rather than only to what arrives next. A live capture keeps the documented behaviour:
+    /// frames are annotated once, as they arrive.
+    /// </summary>
+    private void AfterDbcChanged()
+    {
         UpdateMenuState();
         UpdateSummary();
+        if (_log is not null) ReplayFromHub();
     }
 
     private void SaveCsv_Executed(object sender, ExecutedRoutedEventArgs e)
@@ -1050,10 +1409,10 @@ public partial class MainWindow : Window
         if (dlg.ShowDialog(this) != true) return;
         try
         {
-            // Exported from the capture buffer, not from a pane: with two panes and per-pane
-            // filters "what the screen shows" is ambiguous, and the full capture is what you
-            // actually want in a file.
-            var frames = _hub.GetRecent(int.MaxValue);
+            // Exported from the capture buffer — or the open log — rather than from a pane: with
+            // two panes and per-pane filters "what the screen shows" is ambiguous, and the whole
+            // capture is what you actually want in a file.
+            var frames = _hub.Snapshot();
             // The Time column follows the mode on screen; delta runs over the exported sequence,
             // which is the whole capture rather than one pane's slice of it.
             var time = new TimeBase(_timestampMode, _zeroTs, _zeroWall);
@@ -1084,7 +1443,7 @@ public partial class MainWindow : Window
                     writer.WriteLine(Csv(r.Decoded));
                 }
             }
-            InfoText.Text = $"Saved {frames.Count:N0} captured frames to {dlg.FileName}";
+            InfoText.Text = $"Saved {frames.Length:N0} {(_log is null ? "captured" : "log")} frames to {dlg.FileName}";
         }
         catch (Exception ex)
         {
@@ -1104,8 +1463,18 @@ public partial class MainWindow : Window
 
     // ---------- bus commands ----------
 
-    private void CanEditBusSettings(object sender, CanExecuteRoutedEventArgs e) => e.CanExecute = _adapter is null;
-    private void CanConnect(object sender, CanExecuteRoutedEventArgs e) => e.CanExecute = _adapter is null;
+    // A log holds the ring, so starting a live capture on top of one would interleave two clocks.
+    private void CanEditBusSettings(object sender, CanExecuteRoutedEventArgs e) => e.CanExecute = _adapter is null && _log is null;
+    private void CanConnect(object sender, CanExecuteRoutedEventArgs e) => e.CanExecute = _adapter is null && _log is null;
+
+    /// <summary>
+    /// Pause and Clear both only mean something while frames are arriving. An enabled Pause over
+    /// a file would quietly claim the view is following a bus, and Clear is reflexive enough to
+    /// throw away a load that took seconds, with no way back.
+    /// </summary>
+    private void CanLiveOnly(object sender, CanExecuteRoutedEventArgs e) => e.CanExecute = _log is null;
+
+    private void CanGoToTime(object sender, CanExecuteRoutedEventArgs e) => e.CanExecute = _log is not null;
     private void CanDisconnect(object sender, CanExecuteRoutedEventArgs e) => e.CanExecute = _adapter != null;
 
     private void RefreshDevices_Executed(object sender, ExecutedRoutedEventArgs e) => RefreshDevices();

@@ -7,8 +7,12 @@ using System.Threading.Channels;
 
 namespace CanTerminal.Core;
 
+/// <param name="Mode">"live" when a device is or could be attached, "log" while a file is open.</param>
+/// <param name="LogPath">The open log file, if any.</param>
+/// <param name="ChannelDbc">Per-channel database bindings as "CAN1=engine.dbc", if any.</param>
 public sealed record ApiStatus(bool Connected, string? Adapter, IReadOnlyList<string> Channels, string? DbcPath,
-                               string Profile = "none");
+                               string Profile = "none", string Mode = "live", string? LogPath = null,
+                               IReadOnlyList<string>? ChannelDbc = null);
 
 /// <summary>
 /// Loopback TCP remote-control API: newline-delimited JSON, UTF-8.
@@ -204,6 +208,9 @@ public sealed class TcpApiServer : IDisposable
                     ["channels"] = new JsonArray(st.Channels.Select(c => (JsonNode)c).ToArray()),
                     ["dbc"] = st.DbcPath,
                     ["profile"] = st.Profile,
+                    ["mode"] = st.Mode,
+                    ["log"] = st.LogPath,
+                    ["channelDbc"] = new JsonArray((st.ChannelDbc ?? []).Select(c => (JsonNode)c).ToArray()),
                     ["totalFrames"] = _hub.TotalFrames,
                     ["clients"] = ClientCount,
                 });
@@ -251,6 +258,10 @@ public sealed class TcpApiServer : IDisposable
 
             case "waitfor":
             {
+                // Nothing is ever published while a file is open, so this would block for the
+                // whole timeout and then report a timeout that means nothing.
+                if (StatusProvider?.Invoke().Mode == "log")
+                    return Err(seq, "A log file is open, so no frames will arrive. Use 'recent' to read it.");
                 uint id = ParseId(req["id"] ?? throw new InvalidOperationException("Missing 'id'."));
                 string? channel = req["channel"]?.GetValue<string>()?.ToUpperInvariant();
                 int timeoutMs = Math.Clamp(req["timeoutMs"]?.GetValue<int>() ?? 5000, 1, 300_000);

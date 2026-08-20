@@ -12,8 +12,10 @@ namespace CanTerminal.App;
 public sealed class AppSettings
 {
     public const int MaxRecentDbc = 9;
+    public const int MaxRecentLogs = 9;
 
     public List<string> RecentDbc { get; set; } = [];
+    public List<string> RecentLogs { get; set; } = [];
 
     private static string SettingsPath => System.IO.Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "CanTerminal", "settings.json");
@@ -40,11 +42,15 @@ public sealed class AppSettings
     }
 
     /// <summary>Moves a file to the front of the recent list, keeping it deduplicated and bounded.</summary>
-    public void PushRecentDbc(string path)
+    public void PushRecentDbc(string path) => Push(RecentDbc, path, MaxRecentDbc);
+
+    public void PushRecentLog(string path) => Push(RecentLogs, path, MaxRecentLogs);
+
+    private void Push(List<string> list, string path, int max)
     {
-        RecentDbc.RemoveAll(p => string.Equals(p, path, StringComparison.OrdinalIgnoreCase));
-        RecentDbc.Insert(0, path);
-        if (RecentDbc.Count > MaxRecentDbc) RecentDbc.RemoveRange(MaxRecentDbc, RecentDbc.Count - MaxRecentDbc);
+        list.RemoveAll(p => string.Equals(p, path, StringComparison.OrdinalIgnoreCase));
+        list.Insert(0, path);
+        if (list.Count > max) list.RemoveRange(max, list.Count - max);
         Save();
     }
 }

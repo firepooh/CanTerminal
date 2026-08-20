@@ -14,6 +14,10 @@ public static class AppCommands
         Make("Load DBC", nameof(LoadDbc), new KeyGesture(Key.D, ModifierKeys.Control));
     public static readonly RoutedUICommand SaveCsv =
         Make("Save trace as CSV", nameof(SaveCsv), new KeyGesture(Key.S, ModifierKeys.Control));
+    public static readonly RoutedUICommand OpenLog =
+        Make("Open log", nameof(OpenLog), new KeyGesture(Key.O, ModifierKeys.Control));
+    // No gesture for closing a log, matching Unload DBC: of a load/unload pair this file only
+    // ever binds the load.
 
     public static readonly RoutedUICommand RefreshDevices =
         Make("Refresh devices", nameof(RefreshDevices), new KeyGesture(Key.F5));
@@ -51,6 +55,8 @@ public static class AppCommands
 
     public static readonly RoutedUICommand JumpToLive =
         Make("Jump to live", nameof(JumpToLive), new KeyGesture(Key.End));
+    public static readonly RoutedUICommand GoToTime =
+        Make("Go to time", nameof(GoToTime), new KeyGesture(Key.G, ModifierKeys.Control));
     public static readonly RoutedUICommand TogglePause =
         Make("Pause display", nameof(TogglePause), new KeyGesture(Key.F7));
     public static readonly RoutedUICommand ClearAll =

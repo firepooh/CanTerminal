@@ -28,6 +28,7 @@ public sealed class FrameAnnotator
 {
     private readonly DbcDecoder _dbc;
     private volatile XcpDecoder[] _xcp = [];
+    private volatile Dictionary<string, DbcDecoder> _channelDbc = new(StringComparer.OrdinalIgnoreCase);
 
     public FrameAnnotator(DbcDecoder dbc) => _dbc = dbc;
 
@@ -42,7 +43,26 @@ public sealed class FrameAnnotator
         set => _xcp = value is null ? [] : [.. value];
     }
 
+    /// <summary>
+    /// A database bound to one channel, overriding the global one for frames on it.
+    ///
+    /// Two ports of the same device commonly run the same protocol on different identifiers, and
+    /// nothing stops two buses using one identifier for different messages — so which database
+    /// applies is a property of the channel, not of the session. Empty means every channel falls
+    /// back to the single loaded database, which is what a one-bus setup wants.
+    /// </summary>
+    public IReadOnlyDictionary<string, DbcDecoder> ChannelDbc
+    {
+        get => _channelDbc;
+        set => _channelDbc = value is null
+            ? new Dictionary<string, DbcDecoder>(StringComparer.OrdinalIgnoreCase)
+            : new Dictionary<string, DbcDecoder>(value, StringComparer.OrdinalIgnoreCase);
+    }
+
     public string ProfileName => _xcp.Length == 0 ? "none" : "xcp";
+
+    private DbcDecoder DbcFor(CanFrame f) =>
+        _channelDbc.TryGetValue(f.Channel, out var bound) ? bound : _dbc;
 
     /// <summary>True when any configured session owns this frame. Used by the display filter.</summary>
     public bool IsProtocolFrame(CanFrame f)
@@ -68,9 +88,10 @@ public sealed class FrameAnnotator
         catch { /* a decoder bug must not stop frame capture */ }
 
         string? dbc = null;
-        if (_dbc.IsLoaded)
+        var database = DbcFor(f);
+        if (database.IsLoaded)
         {
-            try { dbc = _dbc.Decode(f); }
+            try { dbc = database.Decode(f); }
             catch { }
         }
 

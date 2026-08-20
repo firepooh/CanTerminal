@@ -235,6 +235,61 @@ public partial class ChannelPane : UserControl
         if (_traceRows.Last is { } last) TraceList.ScrollIntoView(last);
     }
 
+    /// <summary>
+    /// Ends a bulk projection: publishes the rows and parks the view at the top.
+    ///
+    /// Deliberately not <see cref="AfterAppend"/>. That one follows the tail, which is right for
+    /// a capture that is still arriving and wrong for a file — a reader opening a log wants its
+    /// beginning, not its last row.
+    /// </summary>
+    public void FinishProjection()
+    {
+        _traceRows.Resync();
+        TraceScroll?.ScrollToTop();
+    }
+
+    /// <summary>
+    /// Scrolls to the first row at or after <paramref name="seconds"/> on the file's own clock.
+    /// Returns false when this pane holds nothing that late — with two panes filtered
+    /// differently, a moment present in one can be absent from the other.
+    /// </summary>
+    public bool ScrollToTime(double seconds)
+    {
+        int index = -1;
+        for (int i = 0; i < _traceRows.Count; i++)
+        {
+            if (_traceRows[i] is TraceRow row && row.Ts >= seconds) { index = i; break; }
+        }
+        if (index < 0) return false;
+        // By index, not by item: ScrollIntoView(item) resolves it through IndexOf, which is a
+        // scan, and this is the one caller that already knows the answer.
+        if (TraceScroll is { } scroll && _traceRows.Count > 0)
+        {
+            scroll.ScrollToVerticalOffset(index * scroll.ExtentHeight / _traceRows.Count);
+            return true;
+        }
+        TraceList.ScrollIntoView(_traceRows[index]);
+        return true;
+    }
+
+    /// <summary>The trace list's own scroll viewer, found once the template is applied.</summary>
+    private ScrollViewer? TraceScroll =>
+        _traceScroll ??= FindDescendant<ScrollViewer>(TraceList);
+
+    private ScrollViewer? _traceScroll;
+
+    private static T? FindDescendant<T>(DependencyObject root) where T : DependencyObject
+    {
+        int n = System.Windows.Media.VisualTreeHelper.GetChildrenCount(root);
+        for (int i = 0; i < n; i++)
+        {
+            var child = System.Windows.Media.VisualTreeHelper.GetChild(root, i);
+            if (child is T hit) return hit;
+            if (FindDescendant<T>(child) is { } deep) return deep;
+        }
+        return null;
+    }
+
     public void TickFade(double now)
     {
         foreach (var row in _fixedRows) row.TickFade(now);

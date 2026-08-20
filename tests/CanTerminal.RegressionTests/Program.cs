@@ -1,6 +1,8 @@
 using System.Collections.Specialized;
+using System.Globalization;
 using CanTerminal.App;
 using CanTerminal.Core;
+using CanTerminal.Core.Logs;
 using CanTerminal.Core.Xcp;
 // WPF's implicit usings bring in System.Windows.Shapes, whose Path is not this one.
 using File = System.IO.File;
@@ -30,6 +32,21 @@ internal static class Program
         Section("Payload limits");
         VirtualBusRejectsAnOversizedPayload();
         FormatDataSurvivesAnOversizedPayload();
+
+        Section("ASC log reader");
+        HeaderAndDataLinesBecomeFrames();
+        TimestampsMatchDoubleParseExactly();
+        BaseDecIsHonoured();
+        TrailingMetadataIsNotEatenAsData();
+        ASymbolicNameColumnDoesNotHideTheFrame();
+        TxRequestsAreNotCountedTwice();
+        WhatIsNotUnderstoodIsCounted();
+        LineEndingsDoNotChangeTheFrameCount();
+
+        Section("Log into the hub");
+        BulkLoadDoesNotNotifyPerFrame();
+        ReannotateRunsOncePerFrameInOrder();
+        ChannelDbcOverridesTheGlobalOne();
 
         Section("Device selection");
         TheVirtualBusIsNeverChosenForYou();
@@ -144,6 +161,214 @@ internal static class Program
         // which is exactly why the formatter must not be the thing that enforces it.
         string text = TraceRow.FormatData(new byte[256 * 1024]);
         Check("FormatData handles a payload no adapter would pass", text.Length == (256 * 1024 * 3) - 1);
+    }
+
+    // ---------------- ASC log reader ----------------
+
+    private const string AscHeader = """
+        date Thu Jan 2 09:14:24 2025
+        base hex  timestamps absolute
+        internal events logged
+        // STM32H735G-DK CAN logger
+        Begin Triggerblock Thu Jan 2 09:14:24 2025
+           0.000000 Start of measurement
+        """;
+
+    private static LogFile ReadAsc(string body, string header = AscHeader, string newLine = "\r\n")
+    {
+        string path = Path.Combine(Path.GetTempPath(), $"canterminal_test_{Guid.NewGuid():N}.asc");
+        File.WriteAllText(path, (header + "\n" + body).Replace("\r\n", "\n").Replace("\n", newLine));
+        try { return new AscLogReader().Read(path); }
+        finally { try { File.Delete(path); } catch { } }
+    }
+
+    private static void HeaderAndDataLinesBecomeFrames()
+    {
+        var log = ReadAsc("""
+                 0.012700 1  18DAF110x  Rx   d 8 AD 21 00 00 00 00 00 00
+                 0.101600 1  18FFA201x  Tx   d 2 FF 00
+                 0.101100 2  123        Rx   d 3 01 02 03
+            """);
+        Check("three data lines give three frames", log.Frames.Count == 3, log.Frames.Count.ToString());
+        if (log.Frames.Count != 3) return;
+
+        var a = log.Frames[0];
+        Check("extended id, direction and payload read correctly",
+              a.ArbId == 0x18DAF110 && a.IsExtended && a.Direction == FrameDirection.Rx
+              && a.Data.Length == 8 && a.DataText == "AD21000000000000", a.DataText);
+        Check("Tx is recognised", log.Frames[1].Direction == FrameDirection.Tx);
+        // ChannelPalette.Known holds CAN1..CAN4, so anything else would tint unstably.
+        Check("channels are named CAN1 / CAN2",
+              log.Frames[0].Channel == "CAN1" && log.Frames[2].Channel == "CAN2",
+              $"{log.Frames[0].Channel},{log.Frames[2].Channel}");
+        Check("a standard id is not marked extended", !log.Frames[2].IsExtended);
+        Check("the header date is picked up", log.StartWall == new DateTime(2025, 1, 2, 9, 14, 24));
+        Check("nothing was skipped", log.SkippedLines == 0, log.SkippedLines.ToString());
+    }
+
+    /// <summary>
+    /// Reconstructing a timestamp as whole + fraction/10^d rounds twice and lands a bit away from
+    /// what every other reader would produce, so the same instant stops comparing equal.
+    /// </summary>
+    private static void TimestampsMatchDoubleParseExactly()
+    {
+        string[] literals = ["0.012700", "1.0131", "1.1523", "300.114100", "480.678500", "17.000001"];
+        var log = ReadAsc(string.Join("\n", literals.Select(t => $"   {t} 1  100  Rx   d 1 00")));
+        bool same = log.Frames.Count == literals.Length;
+        for (int i = 0; same && i < literals.Length; i++)
+            same = log.Frames[i].Timestamp == double.Parse(literals[i], CultureInfo.InvariantCulture);
+        Check("timestamps are bit-identical to double.Parse", same);
+    }
+
+    /// <summary>
+    /// Under "base dec" the identifier and the payload are decimal. A reader that assumes hex
+    /// reads 256 as 0x256 and turns eight decimal values into eleven bytes, without an error.
+    /// </summary>
+    private static void BaseDecIsHonoured()
+    {
+        string header = AscHeader.Replace("base hex", "base dec");
+        var log = ReadAsc("  16.000000 1  256  Rx   d 4 17 34 51 68", header);
+        Check("base dec reads the id as decimal",
+              log.Frames.Count == 1 && log.Frames[0].ArbId == 256,
+              log.Frames.Count == 1 ? log.Frames[0].ArbId.ToString() : "no frame");
+    }
+
+    private static void TrailingMetadataIsNotEatenAsData()
+    {
+        var log = ReadAsc("   5.000000 1  100  Rx   d 2 11 22 Length = 123 BitCount = 143");
+        Check("exactly DLC bytes are taken",
+              log.Frames.Count == 1 && log.Frames[0].DataText == "1122",
+              log.Frames.Count == 1 ? log.Frames[0].DataText : "no frame");
+    }
+
+    /// <summary>
+    /// A database export writes the message name between the identifier and the direction. A
+    /// parser that counts columns drops every frame of such a file and reports nothing.
+    /// </summary>
+    private static void ASymbolicNameColumnDoesNotHideTheFrame()
+    {
+        var log = ReadAsc("   5.000000 1  100x  EngineData  Rx   d 3 11 22 33");
+        Check("a symbolic name column is skipped, not the frame",
+              log.Frames.Count == 1 && log.Frames[0].DataText == "112233",
+              $"{log.Frames.Count} frames, {log.SkippedLines} skipped");
+    }
+
+    /// <summary>TxRq is a transmit request; the controller reports the frame again when it goes out.</summary>
+    private static void TxRequestsAreNotCountedTwice()
+    {
+        var log = ReadAsc("""
+                 1.000000 1  100  TxRq   d 1 AA
+                 1.000100 1  100  Tx     d 1 AA
+            """);
+        Check("TxRq makes no frame", log.Frames.Count == 1, log.Frames.Count.ToString());
+        Check("TxRq is reported rather than ignored",
+              log.SkippedByShape.Keys.Any(k => k.Contains("TxRq")), string.Join(",", log.SkippedByShape.Keys));
+    }
+
+    /// <summary>
+    /// The counter is the whole safety net for a text format: without it a grammar mismatch is
+    /// indistinguishable from a file that simply had none of those events.
+    /// </summary>
+    private static void WhatIsNotUnderstoodIsCounted()
+    {
+        var log = ReadAsc("""
+                 1.000000 1  100  Rx   d 1 AA
+                 2.000000 1  ErrorFrame
+                 2.100000 Statistic: D 0 R 0 XD 0 XR 0 E 0 O 0 B 0.0%
+                 3.000000 CANFD   1 Rx  18DAF110x  1 0 8 8 11 22 33 44 55 66 77 88  100000 0 0 0 0 0
+                 4.000000 1  100  Rx   d 9 11 22 33 44 55 66 77 88 99
+            """);
+        Check("the good frame still parses", log.Frames.Count == 1, log.Frames.Count.ToString());
+        Check("four lines are reported as not understood", log.SkippedLines == 4, log.SkippedLines.ToString());
+        Check("they are grouped by shape", log.SkippedByShape.Count >= 3, string.Join(" | ", log.SkippedByShape.Keys));
+        Check("verbatim samples are kept", log.SkippedSamples.Count > 0);
+        // A single malformed line must not abort a load of half a million good ones.
+        Check("an over-long classic line is skipped, not thrown",
+              log.SkippedByShape.Values.Sum() == 4);
+    }
+
+    private static void LineEndingsDoNotChangeTheFrameCount()
+    {
+        const string body = """
+                 1.000000 1  100  Rx   d 1 AA
+                 2.000000 2  200x Rx   d 2 BB CC
+            """;
+        var crlf = ReadAsc(body, newLine: "\r\n");
+        var lf = ReadAsc(body, newLine: "\n");
+        Check("CRLF and LF give the same frames",
+              crlf.Frames.Count == 2 && lf.Frames.Count == 2
+              && crlf.Frames[1].DataText == lf.Frames[1].DataText,
+              $"crlf={crlf.Frames.Count} lf={lf.Frames.Count}");
+    }
+
+    // ---------------- log into the hub ----------------
+
+    private static CanFrame LogFrame(double ts, string channel, uint id) =>
+        new() { Timestamp = ts, Channel = channel, ArbId = id, Data = [1, 2, 3] };
+
+    /// <summary>
+    /// Every subscriber to FrameObserved is built for bus rates. Half a million frames in one go
+    /// would overrun the display queue's backlog guard and flood a subscribed API client.
+    /// </summary>
+    private static void BulkLoadDoesNotNotifyPerFrame()
+    {
+        var hub = new MessageHub(capacity: 10);
+        int observed = 0;
+        hub.FrameObserved += _ => observed++;
+
+        var frames = Enumerable.Range(0, 60_000).Select(i => LogFrame(i * 0.001, "CAN1", 0x100)).ToList();
+        hub.SetCapacity(frames.Count);
+        hub.PublishBulk(frames);
+
+        Check("FrameObserved is not raised by a bulk load", observed == 0, observed.ToString());
+        Check("every frame is held", hub.Snapshot().Length == 60_000, hub.Snapshot().Length.ToString());
+        Check("recent() sees them all", hub.GetRecent(int.MaxValue).Count == 60_000);
+        Check("the snapshot is oldest first",
+              hub.Snapshot()[0].Timestamp == 0 && hub.Snapshot()[^1].Timestamp > 59);
+    }
+
+    /// <summary>
+    /// A stateful decoder resolves a data frame from the commands before it, so re-reading has to
+    /// be one pass in capture order — not whatever order the ring happens to be laid out in.
+    /// </summary>
+    private static void ReannotateRunsOncePerFrameInOrder()
+    {
+        var hub = new MessageHub(capacity: 8);
+        var frames = Enumerable.Range(0, 2000).Select(i => LogFrame(i, "CAN1", (uint)i)).ToList();
+        hub.SetCapacity(frames.Count);
+        hub.PublishBulk(frames);
+
+        var seen = new List<uint>();
+        hub.Annotator = f => { seen.Add(f.ArbId); return new FrameAnnotation("t", $"#{f.ArbId}"); };
+        hub.Reannotate();
+
+        Check("each frame is annotated exactly once", seen.Count == 2000, seen.Count.ToString());
+        Check("in capture order", seen.SequenceEqual(Enumerable.Range(0, 2000).Select(i => (uint)i)));
+        Check("the annotation is actually replaced",
+              hub.Snapshot()[7].Annotation?.Comment == "#7", hub.Snapshot()[7].Annotation?.Comment);
+    }
+
+    private static void ChannelDbcOverridesTheGlobalOne()
+    {
+        string path = Path.Combine(AppContext.BaseDirectory, "probe.dbc");
+        if (!File.Exists(path)) { Check("probe.dbc is next to the test binary", false, path); return; }
+
+        var global = new DbcDecoder();
+        var bound = new DbcDecoder();
+        bound.Load(path);
+        var annotator = new FrameAnnotator(global);
+
+        var frame = new CanFrame { Channel = "CAN2", ArbId = 291, Data = [1, 2, 3, 4, 5, 6, 7, 8] };
+        Check("with nothing loaded there is no comment", annotator.Annotate(frame) is null);
+
+        annotator.ChannelDbc = new Dictionary<string, DbcDecoder> { ["CAN2"] = bound };
+        Check("a bound channel uses its own database",
+              annotator.Annotate(frame)?.Comment?.StartsWith("TestMsg") == true,
+              annotator.Annotate(frame)?.Comment);
+
+        var other = new CanFrame { Channel = "CAN1", ArbId = 291, Data = [1, 2, 3, 4, 5, 6, 7, 8] };
+        Check("an unbound channel falls back to the global one, here empty",
+              annotator.Annotate(other) is null, annotator.Annotate(other)?.Comment);
     }
 
     // ---------------- device selection ----------------

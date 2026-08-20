@@ -33,9 +33,9 @@ dotnet build CanTerminal.slnx
 
 | 메뉴 | 내용 |
 |---|---|
-| **File** | Load DBC… (`Ctrl+D`) · Recent DBC ▸ (최근 9개) · Unload DBC · Save trace as CSV… (`Ctrl+S`) |
+| **File** | Open log… (`Ctrl+O`) · Recent logs ▸ · Close log · Load DBC… (`Ctrl+D`, 여러 개 고르면 채널별) · Recent DBC ▸ (최근 9개) · Unload DBC · Save trace as CSV… (`Ctrl+S`) |
 | **Bus** | Refresh devices (`F5`) · Device ▸ · Channels… (`Ctrl+Shift+C`) · Bitrate ▸ · CAN FD ▸ · Connect (`F9`) / Disconnect (`Shift+F9`) |
-| **View** | Layout ▸ (`Ctrl+1/2/3`, XCP split `Ctrl+4`) · Pane A ▸ / Pane B ▸ · Text size ▸ (`Ctrl+±`, `Ctrl+0`, Ctrl+휠) · Timestamps ▸ · Highlight changes · Jump to newest (`End`) · History size… · Pause display (`F7`) · Clear all (`Ctrl+L`) |
+| **View** | Layout ▸ (`Ctrl+1/2/3`, XCP split `Ctrl+4`) · Pane A ▸ / Pane B ▸ · Text size ▸ (`Ctrl+±`, `Ctrl+0`, Ctrl+휠) · Timestamps ▸ · Highlight changes · Go to time… (`Ctrl+G`) · Jump to newest (`End`) · History size… · Pause display (`F7`) · Clear all (`Ctrl+L`) |
 | **Transmit** | Send frame (`Ctrl+Enter`) · Start/Stop cyclic TX (`F6` / `Shift+F6`) · Cycle time… · TX channel ▸ · Extended ID / CAN FD frame / Bit rate switch |
 | **Profile** | None / XCP on CAN · Set IDs on channel… · Remove session on channel ▸ · Load IDs from A2L… · Show XCP IDs only |
 | **Tools** | API server · API server port… · Copy python snippet |
@@ -244,6 +244,103 @@ CSV 저장에는 모든 프레임이 그대로 있습니다.
 | 관리 배열 + OneWay 바인딩 | 33.9% | 66 ~ 100% | 21 ~ 26 ms |
 | raw pointer | 3.6% | 43 ~ 60% | 21 ms |
 | + `Mode=OneTime` | 3.6% | **28 ~ 36%** | **1.3 ms** |
+
+## 기록된 로그 열어 보기 (오프라인)
+
+`File ▸ Open log…` (`Ctrl+O`)로 **Vector ASCII 로그(`*.asc`)** 를 읽어 브라우징합니다.
+보드가 SD카드에 그대로 뱉는 형식이라 변환 단계가 없습니다. 실측: 483,621 프레임 26 MB를
+**449 ms**에 파싱, 미인식 0줄.
+
+| | |
+|---|---|
+| 열기 | `File ▸ Open log…` (`Ctrl+O`), `Recent logs ▸`, `File ▸ Close log` |
+| 시간 이동 | `View ▸ Go to time…` (`Ctrl+G`) — 파일 자체 시계 기준 초 |
+| DBC | `File ▸ Load DBC…`에서 **여러 파일 선택 시 채널별로 배정** (파일명 순서, 배정 결과를 표로 확인) |
+| XCP | `Profile ▸`의 모든 항목이 그대로 동작하며 **파일 전체에 소급 적용** |
+
+### 라이브와 절대 헷갈리지 않게
+
+이 프로그램은 버스에 무엇이 있었는지를 말하는 것이 전부라, 파일을 라이브로 착각하는 것이
+가장 나쁜 실패입니다. 그래서 로그를 열면 한눈에 다릅니다.
+
+- 툴바가 앰버색으로 바뀝니다 — **Pause와 같은 색**입니다. 두 상태가 같은 주장(화면이 버스를
+  따라가기를 멈췄다)을 하므로 새 색을 만들지 않았습니다
+- 제목이 `971_972_merged.asc — log file (offline) — CanTerminal`
+- 상태바가 `LOG FILE — <파일명>`, 그리고 fps 대신 **시간 범위**(`0.013 – 480.678 s`)
+- Connect 버튼이 `Close log`로 바뀌고, Connect·Pause·Clear·TX가 전부 비활성
+
+Pause와 Clear를 막는 이유는 각각입니다 — 파일 위의 Pause는 "버스를 따라가는 중"이라고
+거짓 주장을 하고, Clear는 반사적으로 눌리는 버튼이라 수 초 걸린 로드를 되돌릴 방법 없이
+날립니다. 로그를 벗어나는 길은 `Close log` 하나입니다.
+
+### 이해하지 못한 줄은 반드시 보고합니다
+
+텍스트 포맷은 **예외를 던지며 실패하지 않고, 매칭되는 줄이 줄어들며 실패합니다.** 문법이
+안 맞으면 프레임이 조용히 사라지고 화면은 멀쩡해 보입니다. 그래서 리더가 해석하지 못한
+줄은 종류별로 세어서 로드 직후 창으로 알리고, 상태바에 `N lines not understood`로 남깁니다.
+이 카운터가 없으면 "이 파일엔 에러 프레임이 없었다"와 "파서가 에러 프레임을 못 본다"를
+구분할 수 없습니다.
+
+현재 프레임으로 읽는 것은 classic CAN 데이터/리모트 라인입니다. ErrorFrame, CAN FD,
+`Statistic:`, `TxRq`는 세어서 보고만 합니다 (`TxRq`는 전송 *요청*이라, 실제로 나갈 때 다시
+보고되므로 프레임으로 만들면 송신이 두 번 잡힙니다).
+
+파서가 위치가 아니라 **검색**으로 방향 토큰(`Rx`/`Tx`/`TxRq`)을 찾는 것도 같은 이유입니다 —
+CANoe DB export는 ID와 방향 사이에 심볼릭 메시지 이름을 넣는데, 컬럼을 세는 파서는 그런
+파일의 프레임을 **한 마디 없이 전부** 잃습니다.
+
+### 채널별 DBC
+
+사용자 파이프라인이 그렇듯 포트마다 다른 데이터베이스를 쓰는 경우가 흔합니다
+(CAN1→`p1.dbc`, CAN2→`p2.dbc`). `Load DBC…`에서 여러 파일을 고르면 파일명 순서로 채널에
+배정하고 **어느 파일이 어느 채널에 갔는지 표로 확인**합니다 — 조용히 뒤바뀌면 모든 프레임이
+엉뚱한 데이터베이스로 디코딩되면서도 그럴듯해 보이기 때문입니다. 한 개만 고르면 종전대로
+전 채널 공용입니다.
+
+### 로그에서는 XCP가 처음부터 재생됩니다
+
+**이것이 파일이 라이브보다 나은 유일한 지점입니다.** 라이브로 세션 중간에 붙으면 XCP 디코더는
+그 뒤만 봅니다. 파일은 첫 프레임부터 다시 읽으므로 `CONNECT`·`ALLOC_DAQ`·`ALLOC_ODT`가 전부
+디코딩되고, DAQ-DTO의 PID가 **실제 DAQ/ODT 번호로 해석**됩니다.
+
+실측 (`971_972_merged.asc`, 채널별 DBC + XCP 세션 2개):
+
+```
+DBC 디코딩       : 418,761 (86.6%)
+DAQ/ODT 실번호 해석: 418,651
+  0.170800 CAN2 18FFA302 DAQ-DTO (DAQ #0|ODT #0)  XCP_DAQ_P2: XCP_PID=0, DAQ0_ENT0_UINT8_VAR0=253, ...
+```
+
+DBC나 XCP 세션을 **나중에 바꿔도 파일 전체가 다시 디코딩됩니다.** README 아래 "이미 캡처된
+프레임은 소급 적용되지 않음"은 라이브 캡처에만 해당하는 이야기이고, 로그 모드는 그 예외입니다.
+
+### 비용
+
+| | |
+|---|---|
+| 파싱 | 483,621 프레임 / 449 ms |
+| 허브 적재 + 디코딩 | 약 2.6 s (백그라운드, 진행률 창) |
+| 패널에 행 만들기 | 약 2.5 s / 패널 (UI 스레드, 대기 커서), 약 133 MiB |
+
+트레이스 링 버퍼는 로그를 열 때 **파일 크기로 늘어납니다.** 그대로 두면 최신 5만 행만 남기고
+나머지를 버리는데, 그러면 파일의 마지막 10%를 보면서 전체를 보는 것처럼 보입니다. 닫으면
+`View ▸ History size…`에서 고른 값으로 돌아갑니다.
+
+파일이 아주 크면(대략 100만 프레임 초과 추정) 열기 전에 예상 메모리를 알리고 물어봅니다.
+
+### MDF4는 아직 아닙니다
+
+`*.mf4`를 고르면 지원하지 않는다고 명확히 말합니다. 빈 화면을 보여주지 않습니다.
+
+지금 넣지 않은 이유는 사용자 샘플로 실측해서 나왔습니다. 프레임을 담은
+`971_972_merged.mf4`는 483,621 프레임 전 필드가 `merged.asc`와 **불일치 0**인 무손실 재인코딩이라
+새로 볼 수 있는 데이터가 0이고, `971_972_MDBC.mf4`는 `CAN_DataFrame` 채널이 아예 없는 신호
+파일이라 프레임 뷰어로는 구조적으로 빈 화면입니다. 반면 MDF4 리더의 실패는 **조용합니다** —
+포맷에 체크섬이 없고, DZBLOCK을 역전치 없이 읽어도 `cycle_count × data_bytes == 데이터 총량`
+같은 산술 불변식을 전부 통과하면서 시간 `2.82e+193` 같은 값을 내놓습니다.
+
+붙이는 날에는 `ILogReader` 구현 하나를 `LogReaders.All`에 추가하면 되고, 미구현 블록은
+best-effort로 디코딩하지 말고 block id를 이름으로 **거절**해야 합니다.
 
 ## 파이썬 테스트 연동
 
@@ -454,5 +551,7 @@ ValueCAN 4-2 실물로 검증 완료: 장치 인식/오픈, 500kbps 설정, CAN1
 - Pause는 표시만 멈추며, 일시정지 중 프레임은 재개 후 화면에 나타나지 않음 (`recent`/API로는 조회 가능).
 - 디코딩(DBC/프로파일)은 프레임 수신 시점에 1회 수행되어 붙습니다. 따라서 DBC나 XCP 프로파일을
   나중에 적용하면 **이후 프레임부터** 디코딩됩니다 (이미 캡처된 프레임은 소급 적용되지 않음).
+  **로그 파일을 연 경우는 예외** — 파일 전체가 처음부터 다시 디코딩됩니다 (위 오프라인 절 참조).
+- 로그 열람은 Vector ASC만 지원합니다. MDF4는 명시적으로 거절합니다 (이유는 위 절에).
 - XCP: 블록 전송(다중 outstanding 명령)은 미고려 — 단일 요청/응답 흐름을 가정합니다.
 - `waitfor`는 같은 연결의 후속 요청을 블록함 (연결당 순차 처리). 병렬 대기가 필요하면 연결을 나눌 것.

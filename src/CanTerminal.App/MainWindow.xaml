@@ -111,6 +111,8 @@
 
     <Window.CommandBindings>
         <CommandBinding Command="{x:Static local:AppCommands.LoadDbc}"        Executed="LoadDbc_Executed"/>
+        <CommandBinding Command="{x:Static local:AppCommands.OpenLog}"        Executed="OpenLog_Executed"/>
+        <CommandBinding Command="{x:Static local:AppCommands.GoToTime}"       Executed="GoToTime_Executed"       CanExecute="CanGoToTime"/>
         <CommandBinding Command="{x:Static local:AppCommands.SaveCsv}"        Executed="SaveCsv_Executed"/>
         <CommandBinding Command="{x:Static local:AppCommands.RefreshDevices}" Executed="RefreshDevices_Executed" CanExecute="CanEditBusSettings"/>
         <CommandBinding Command="{x:Static local:AppCommands.EditChannels}"   Executed="EditChannels_Executed"   CanExecute="CanEditBusSettings"/>
@@ -124,8 +126,8 @@
         <CommandBinding Command="{x:Static local:AppCommands.FontSmaller}"    Executed="FontSmaller_Executed"/>
         <CommandBinding Command="{x:Static local:AppCommands.FontReset}"      Executed="FontReset_Executed"/>
         <CommandBinding Command="{x:Static local:AppCommands.JumpToLive}"     Executed="JumpToLive_Executed"/>
-        <CommandBinding Command="{x:Static local:AppCommands.TogglePause}"    Executed="TogglePause_Executed"/>
-        <CommandBinding Command="{x:Static local:AppCommands.ClearAll}"       Executed="ClearAll_Executed"/>
+        <CommandBinding Command="{x:Static local:AppCommands.TogglePause}"    Executed="TogglePause_Executed"   CanExecute="CanLiveOnly"/>
+        <CommandBinding Command="{x:Static local:AppCommands.ClearAll}"       Executed="ClearAll_Executed"       CanExecute="CanLiveOnly"/>
         <CommandBinding Command="{x:Static local:AppCommands.SendFrame}"      Executed="SendFrame_Executed"      CanExecute="CanTransmit"/>
         <CommandBinding Command="{x:Static local:AppCommands.StartCyclic}"    Executed="StartCyclic_Executed"    CanExecute="CanTransmit"/>
         <CommandBinding Command="{x:Static local:AppCommands.StopCyclic}"     Executed="StopCyclic_Executed"     CanExecute="CanTransmit"/>
@@ -142,7 +144,15 @@
             </Menu.Resources>
 
             <MenuItem Header="_File">
-                <MenuItem Header="_Load DBC…" Command="{x:Static local:AppCommands.LoadDbc}"/>
+                <MenuItem Header="_Open log…" Command="{x:Static local:AppCommands.OpenLog}"
+                          ToolTip="Read a logged capture from disk and browse it offline. Select several DBC files afterwards to bind one per channel."/>
+                <MenuItem x:Name="MenuRecentLogs" Header="Recent lo_gs" SubmenuOpened="RecentLogsMenu_Opened">
+                    <MenuItem Header="(none)" IsEnabled="False"/>
+                </MenuItem>
+                <MenuItem x:Name="MenuCloseLog" Header="_Close log" Click="CloseLog_Click"/>
+                <Separator/>
+                <MenuItem Header="_Load DBC…" Command="{x:Static local:AppCommands.LoadDbc}"
+                          ToolTip="One file applies to every channel. Select several to bind one per channel, in filename order."/>
                 <!-- Filled on open; the placeholder exists because WPF never opens an empty submenu. -->
                 <MenuItem x:Name="MenuRecentDbc" Header="_Recent DBC" SubmenuOpened="RecentDbcMenu_Opened">
                     <MenuItem Header="(none)" IsEnabled="False"/>
@@ -219,6 +229,8 @@
                 <MenuItem x:Name="MenuHighlight" Header="_Highlight changes" IsCheckable="True" IsChecked="True"
                           Unchecked="Highlight_Changed"
                           ToolTip="In the Fixed view, briefly highlight data bytes whose value changed."/>
+                <MenuItem Header="_Go to time…" Command="{x:Static local:AppCommands.GoToTime}"
+                          ToolTip="Scroll both panes to a moment on the open log's own clock."/>
                 <MenuItem Header="_Jump to newest" Command="{x:Static local:AppCommands.JumpToLive}"
                           ToolTip="Return to the newest row after scrolling back through a paused capture."/>
                 <Separator/>
@@ -284,7 +296,7 @@
         </Menu>
 
         <!-- ===== toolbar: only what gets touched while traffic is flowing ===== -->
-        <Border DockPanel.Dock="Top" Background="#F7F9FB" BorderBrush="#E2E8EE" BorderThickness="0,0,0,1"
+        <Border x:Name="ToolbarBar" DockPanel.Dock="Top" Background="#F7F9FB" BorderBrush="#E2E8EE" BorderThickness="0,0,0,1"
                 Padding="12,9">
             <Grid>
                 <Grid.ColumnDefinitions>
