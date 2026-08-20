@@ -57,6 +57,14 @@ public interface ILogReader
     bool CanRead(string path);
 
     /// <summary>
+    /// Rough frame count for a file of this size, for the "large file" warning that has to fire
+    /// before the read it warns about. Format-specific: a text line and a binary record differ
+    /// by 2x, and a single shared constant was measured against one and silently wrong for the
+    /// other.
+    /// </summary>
+    long EstimateFrames(long fileSize);
+
+    /// <summary>
     /// Reads the whole file. Throws <see cref="OperationCanceledException"/> if cancelled —
     /// never a partial <see cref="LogFile"/>.
     /// </summary>

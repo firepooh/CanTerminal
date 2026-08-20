@@ -27,9 +27,10 @@ jobs:
         with:
           python-version: '3.12'
 
-      # 태그(v1.2.3)면 태그에서 버전을 뽑고, 일반 푸시/PR 이면 개발 버전을 붙인다.
+      # 태그(v1.2.3)면 태그에서 버전을 뽑고, 일반 푸시/PR 이면 Directory.Build.props 의
+      # base(예: 1.2.0-dev)에 run number 를 붙인다 — 개발 버전의 출처를 한 곳으로 유지.
       # 이 값이 -p:Version 으로 모든 어셈블리에 찍히고, About 창과 TCP API 의 status,
-      # MCP serverInfo 가 전부 그것을 읽는다 (Directory.Build.props 참조).
+      # MCP serverInfo 가 전부 그것을 읽는다.
       - name: Determine version
         id: ver
         shell: pwsh
@@ -37,7 +38,8 @@ jobs:
           if ('${{ github.ref }}'.StartsWith('refs/tags/v')) {
             $v = '${{ github.ref_name }}'.TrimStart('v')
           } else {
-            $v = "1.0.0-dev.${{ github.run_number }}"
+            $base = ([xml](Get-Content Directory.Build.props)).Project.PropertyGroup.Version
+            $v = "$base.${{ github.run_number }}"
           }
           "version=$v" >> $env:GITHUB_OUTPUT
           Write-Host "Version: $v"

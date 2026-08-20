@@ -1,3 +1,5 @@
+using System.Globalization;
+using System.Text;
 using System.Windows.Input;
 
 namespace CanTerminal.App;
@@ -78,4 +80,48 @@ public static class AppCommands
         foreach (var g in gestures) collection.Add(g);
         return new RoutedUICommand(text, name, typeof(AppCommands), collection);
     }
+
+    /// <summary>
+    /// Every command above, grouped the way the menu bar groups them. The Help dialog renders
+    /// this, so a command added to this file appears there by construction — the previous dialog
+    /// was a hardcoded copy of the same information, and Ctrl+O and Ctrl+G had already gone
+    /// missing from it while the menus carried them. A test holds the two views together.
+    /// </summary>
+    internal static readonly (string Section, RoutedUICommand[] Commands)[] MenuSections =
+    [
+        ("File", [OpenLog, LoadDbc, SaveCsv]),
+        ("Bus", [RefreshDevices, EditChannels, Connect, Disconnect]),
+        ("View", [LayoutSingle, LayoutSplitH, LayoutSplitV, LayoutXcpSplit,
+                  FontLarger, FontSmaller, FontReset,
+                  GoToTime, JumpToLive, TogglePause, ClearAll]),
+        ("Transmit", [SendFrame, StartCyclic, StopCyclic]),
+        ("Help", [Shortcuts]),
+    ];
+
+    /// <summary>The body of the Help ▸ Keyboard shortcuts dialog.</summary>
+    internal static string ShortcutsText()
+    {
+        var sb = new StringBuilder();
+        foreach (var (section, commands) in MenuSections)
+        {
+            if (sb.Length > 0) sb.AppendLine();
+            sb.AppendLine(section);
+            foreach (var command in commands)
+                sb.AppendLine($"  {GestureText(command),-16}{command.Text}");
+        }
+        // The one shortcut with no command behind it: the panes raise ZoomRequested themselves.
+        sb.AppendLine();
+        sb.Append("  Ctrl+wheel      Text size, over either pane");
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// A command's first gesture as the menu shows it: the explicit display string where one was
+    /// given (KeyConverter renders D1 as "D1" and Return as "Return"), the converter's reading
+    /// otherwise.
+    /// </summary>
+    internal static string GestureText(RoutedUICommand command) =>
+        command.InputGestures.OfType<KeyGesture>().FirstOrDefault() is not { } g ? ""
+        : g.DisplayString.Length > 0 ? g.DisplayString
+        : g.GetDisplayStringForCulture(CultureInfo.InvariantCulture);
 }

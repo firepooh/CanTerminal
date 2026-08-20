@@ -69,6 +69,13 @@ CAN1,CAN2 · 500k · no DBC · Profile: None
 DBC 미로드면 Unload DBC, Layout이 Single이면 Pane B, Profile이 None이면 XCP 항목 전체.
 연결 중에는 Device/Bitrate/CAN FD가 잠깁니다.
 
+**세션 설정은 종료 시 저장되어 다음 실행에 복원됩니다** — 채널 문자열, 비트레이트/FD, 레이아웃,
+글자 크기, 타임스탬프 모드, History size, API 서버 on/off·포트, 주기 TX 간격, 창 크기·위치까지
+(`%APPDATA%\CanTerminal\settings.json`, 최근 파일 목록과 같은 파일). 손으로 고친 값이 범위를
+벗어나면 각 다이얼로그가 허용하는 범위로 잘리고, 파일이 깨져 있으면 기본값으로 시작합니다 —
+설정 파일 때문에 시작이 실패하는 일은 없습니다. 저장된 위치가 화면 밖(모니터를 뽑은 경우)이면
+위치만 무시합니다.
+
 > 패널의 Channel 선택과 Trace/Fixed 전환은 **패널 헤더에 그대로** 있습니다.
 > 창 메뉴로 올리면 어느 패널 얘기인지 모호해집니다 (메뉴의 Pane A/B는 같은 값을 미러링합니다).
 
@@ -614,7 +621,9 @@ dotnet run --project tests/CanTerminal.RegressionTests
 ## 버전과 릴리스
 
 버전은 [`Directory.Build.props`](Directory.Build.props)의 `<Version>` 하나에서 나오고,
-**모든 어셈블리가 같은 값을 찍습니다.** 표시하는 곳은 세 군데입니다:
+**모든 어셈블리가 같은 값을 찍습니다.** 이 값은 **다음 릴리스 + `-dev`** 로 둡니다
+(예: v1.1.0을 찍은 뒤에는 `1.2.0-dev`) — 그냥 `1.1.0`으로 두면 아무 PC에서나 빌드한 바이너리가
+공개된 v1.1.0 릴리스와 자신을 구분할 수 없기 때문입니다. 태그를 민 직후 한 줄 올려 주면 됩니다. 표시하는 곳은 세 군데입니다:
 
 | 어디 | 무엇 |
 |---|---|
@@ -635,7 +644,7 @@ git push origin v1.1.0
 
 [`.github/workflows/build.yml`](.github/workflows/build.yml)이 Windows 러너에서:
 
-1. 태그에서 버전을 뽑아 `-p:Version=`으로 빌드 (태그가 아니면 `1.0.0-dev.<run>`)
+1. 태그에서 버전을 뽑아 `-p:Version=`으로 빌드 (태그가 아니면 props의 base에 run number를 붙인 `1.2.0-dev.<run>` 형태)
 2. **회귀 테스트 + 종단간 테스트를 돌립니다** — 통과 못 하면 릴리스가 안 나옵니다
 3. framework-dependent / self-contained 두 벌을 single-file로 publish
 4. zip 두 개를 만들어 아티팩트로 올리고, **태그일 때만** GitHub Release를 만듭니다

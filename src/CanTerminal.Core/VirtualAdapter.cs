@@ -14,8 +14,8 @@ public sealed class VirtualAdapter : ICanAdapter
     private readonly Stopwatch _clock = Stopwatch.StartNew();
     private Timer? _trafficTimer;
     private volatile bool _open;
-    private bool _generateTraffic;
-    private bool _echoResponder;
+    private readonly bool _generateTraffic;
+    private readonly bool _echoResponder;
     private uint _counter;
 
     public VirtualAdapter(bool generateTraffic = true, bool echoResponder = true)
@@ -77,22 +77,36 @@ public sealed class VirtualAdapter : ICanAdapter
             Task.Delay(5).ContinueWith(_ =>
             {
                 if (!_open) return;
-                Publish(new CanFrame
+                // Swallowed for the same reason EmitTraffic's guard exists — though here an
+                // exception would fault the task rather than the process, silently either way.
+                try
                 {
-                    Timestamp = _clock.Elapsed.TotalSeconds,
-                    Channel = ch,
-                    ArbId = arbId + 0x100,
-                    IsExtended = extended,
-                    IsFd = fd,
-                    IsBrs = brs,
-                    Direction = FrameDirection.Rx,
-                    Data = echoData,
-                });
+                    Publish(new CanFrame
+                    {
+                        Timestamp = _clock.Elapsed.TotalSeconds,
+                        Channel = ch,
+                        ArbId = arbId + 0x100,
+                        IsExtended = extended,
+                        IsFd = fd,
+                        IsBrs = brs,
+                        Direction = FrameDirection.Rx,
+                        Data = echoData,
+                    });
+                }
+                catch { }
             });
         }
     }
 
     private void EmitTraffic(object? _)
+    {
+        // The guard the real adapter's RX loop has, for the same reason: this runs on a timer
+        // thread, and a subscriber that throws would otherwise end the process.
+        try { EmitTrafficCore(); }
+        catch { }
+    }
+
+    private void EmitTrafficCore()
     {
         if (!_open) return;
         uint n = _counter++;

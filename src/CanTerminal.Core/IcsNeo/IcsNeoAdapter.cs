@@ -224,53 +224,65 @@ public sealed class IcsNeoAdapter : ICanAdapter
                 // a driver change becomes silent memory corruption instead of a dropped frame.
                 if (count > MaxRxBuffer) count = MaxRxBuffer;
 
-                for (int i = 0; i < count; i++)
+                // The whole batch under one guard. FrameReceived runs the hub, the annotators
+                // and every subscriber on this thread, and an unhandled exception on a
+                // background thread ends the process — the capture goes down with whichever
+                // subscriber threw. Losing the rest of one batch and saying so is the survivable
+                // version of that.
+                try
                 {
-                    IcsSpyMessage* m = buffer + i;
-                    if (!_netIdToChannel.TryGetValue(m->NetworkID, out var channel)) continue;
-                    // NOTE: SPY_STATUS_NETWORK_MESSAGE_TYPE (0x4000000) is set on ordinary bus
-                    // frames from ValueCAN 4 devices — it must NOT be filtered out.
-                    // Keep only CAN / CAN FD protocol messages.
-                    if (m->Protocol != SPY_PROTOCOL_CAN && m->Protocol != SPY_PROTOCOL_CANFD) continue;
-
-                    double ts = 0;
-                    icsneoGetTimeStampForMsg(_handle, m, ref ts);
-
-                    bool isFd = m->Protocol == SPY_PROTOCOL_CANFD || (m->StatusBitField3 & SPY_STATUS3_CANFD_FDF) != 0;
-                    int len = m->NumberBytesData;
-                    byte[] payload;
-                    if (m->ExtraDataPtrEnabled != 0 && m->ExtraDataPtr != IntPtr.Zero && len > 8)
+                    for (int i = 0; i < count; i++)
                     {
-                        payload = new byte[Math.Min(len, 64)];
-                        Marshal.Copy(m->ExtraDataPtr, payload, 0, payload.Length);
+                        IcsSpyMessage* m = buffer + i;
+                        if (!_netIdToChannel.TryGetValue(m->NetworkID, out var channel)) continue;
+                        // NOTE: SPY_STATUS_NETWORK_MESSAGE_TYPE (0x4000000) is set on ordinary bus
+                        // frames from ValueCAN 4 devices — it must NOT be filtered out.
+                        // Keep only CAN / CAN FD protocol messages.
+                        if (m->Protocol != SPY_PROTOCOL_CAN && m->Protocol != SPY_PROTOCOL_CANFD) continue;
+
+                        double ts = 0;
+                        icsneoGetTimeStampForMsg(_handle, m, ref ts);
+
+                        bool isFd = m->Protocol == SPY_PROTOCOL_CANFD || (m->StatusBitField3 & SPY_STATUS3_CANFD_FDF) != 0;
+                        int len = m->NumberBytesData;
+                        byte[] payload;
+                        if (m->ExtraDataPtrEnabled != 0 && m->ExtraDataPtr != IntPtr.Zero && len > 8)
+                        {
+                            payload = new byte[Math.Min(len, 64)];
+                            Marshal.Copy(m->ExtraDataPtr, payload, 0, payload.Length);
+                        }
+                        else
+                        {
+                            payload = new byte[Math.Min(len, 8)];
+                            for (int b = 0; b < payload.Length; b++) payload[b] = m->Data[b];
+                        }
+
+                        FrameReceived?.Invoke(new CanFrame
+                        {
+                            Timestamp = ts,
+                            Channel = channel,
+                            ArbId = (uint)m->ArbIDOrHeader,
+                            IsExtended = (m->StatusBitField & SPY_STATUS_XTD_FRAME) != 0 || (isFd && (m->StatusBitField3 & SPY_STATUS3_CANFD_IDE) != 0),
+                            IsFd = isFd,
+                            IsBrs = (m->StatusBitField3 & SPY_STATUS3_CANFD_BRS) != 0,
+                            IsRemote = (m->StatusBitField & SPY_STATUS_REMOTE_FRAME) != 0,
+                            IsError = (m->StatusBitField & SPY_STATUS_GLOBAL_ERR) != 0 || (m->StatusBitField2 & SPY_STATUS2_ERROR_FRAME) != 0,
+                            Direction = (m->StatusBitField & SPY_STATUS_TX_MSG) != 0 ? FrameDirection.Tx : FrameDirection.Rx,
+                            Data = payload,
+                        });
                     }
-                    else
-                    {
-                        payload = new byte[Math.Min(len, 8)];
-                        for (int b = 0; b < payload.Length; b++) payload[b] = m->Data[b];
-                    }
 
-                    FrameReceived?.Invoke(new CanFrame
+                    if (errors > 0)
                     {
-                        Timestamp = ts,
-                        Channel = channel,
-                        ArbId = (uint)m->ArbIDOrHeader,
-                        IsExtended = (m->StatusBitField & SPY_STATUS_XTD_FRAME) != 0 || (isFd && (m->StatusBitField3 & SPY_STATUS3_CANFD_IDE) != 0),
-                        IsFd = isFd,
-                        IsBrs = (m->StatusBitField3 & SPY_STATUS3_CANFD_BRS) != 0,
-                        IsRemote = (m->StatusBitField & SPY_STATUS_REMOTE_FRAME) != 0,
-                        IsError = (m->StatusBitField & SPY_STATUS_GLOBAL_ERR) != 0 || (m->StatusBitField2 & SPY_STATUS2_ERROR_FRAME) != 0,
-                        Direction = (m->StatusBitField & SPY_STATUS_TX_MSG) != 0 ? FrameDirection.Tx : FrameDirection.Rx,
-                        Data = payload,
-                    });
+                        int n = 0;
+                        var errBuf = new int[600];
+                        if (icsneoGetErrorMessages(_handle, errBuf, ref n) != 0 && n > 0)
+                            ErrorOccurred?.Invoke($"{n} bus error event(s): [{string.Join(",", errBuf.Take(Math.Min(n, 8)))}]");
+                    }
                 }
-
-                if (errors > 0)
+                catch (Exception ex)
                 {
-                    int n = 0;
-                    var errBuf = new int[600];
-                    if (icsneoGetErrorMessages(_handle, errBuf, ref n) != 0 && n > 0)
-                        ErrorOccurred?.Invoke($"{n} bus error event(s): [{string.Join(",", errBuf.Take(Math.Min(n, 8)))}]");
+                    ErrorOccurred?.Invoke($"RX processing failed mid-batch ({ex.Message}) — still receiving.");
                 }
             }
         }

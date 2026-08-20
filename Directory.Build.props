@@ -3,8 +3,12 @@
   <PropertyGroup>
     <!-- The version every assembly in the repo carries. CI overrides it from the tag with
          -p:Version=..., so a tagged build is stamped with the tag and nothing has to be edited
-         to cut a release; this value is what a local build reports. -->
-    <Version>1.0.0</Version>
+         to cut a release; this value is what a local or untagged CI build reports.
+
+         Convention: next planned release + "-dev", bumped right after each tag. A plain "1.1.0"
+         here would make a build off somebody's desk indistinguishable from the published
+         v1.1.0. CI appends ".<run number>" for untagged builds (see build.yml). -->
+    <Version>1.2.0-dev</Version>
 
     <Product>CanTerminal</Product>
     <Authors>firepooh</Authors>

@@ -74,6 +74,18 @@ internal static class Program
         WordAlignedIdFieldSkipsTheFillByte();
         ErrorNamesTheSubCommand();
 
+        Section("Shortcuts dialog");
+        EveryCommandAppearsInTheShortcutsDialog();
+        TheTwoMissingShortcutsAreBack();
+
+        Section("Settings");
+        SessionSettingsRoundTrip();
+        AGarbageFileYieldsDefaults();
+        AHandEditedFileIsClamped();
+
+        Section("Log size estimate");
+        EstimatesAreFormatSpecific();
+
         Console.WriteLine();
         Console.WriteLine(_failures == 0 ? "ALL PASS" : $"{_failures} FAILURE(S)");
         return _failures == 0 ? 0 : 1;
@@ -798,6 +810,143 @@ internal static class Program
         var err = xcp.Decode(Frame([0xFE, 0x20], 0x701));
         Check("ERR names GET_SLAVE_ID rather than the generic command",
               err?.Comment?.Contains("GET_SLAVE_ID") == true, err?.Comment);
+    }
+
+    // ---------------- Shortcuts dialog ----------------
+
+    /// <summary>
+    /// The dialog is generated from AppCommands.MenuSections; this holds the two together. The
+    /// previous dialog was a hardcoded copy of the same information and had already lost Ctrl+O
+    /// and Ctrl+G while the menus carried them. The exact formatted line is required, not just
+    /// the substrings — "Connect" is contained in "Disconnect", and "F9" in "Shift+F9".
+    /// </summary>
+    private static void EveryCommandAppearsInTheShortcutsDialog()
+    {
+        string text = AppCommands.ShortcutsText();
+        var commands = typeof(AppCommands)
+            .GetFields(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static)
+            .Where(f => f.FieldType == typeof(System.Windows.Input.RoutedUICommand))
+            .Select(f => (f.Name, Command: (System.Windows.Input.RoutedUICommand)f.GetValue(null)!))
+            .ToList();
+        Check("AppCommands declares commands", commands.Count > 0);
+        foreach (var (name, command) in commands)
+        {
+            string gesture = AppCommands.GestureText(command);
+            string line = $"  {gesture,-16}{command.Text}";
+            Check($"{name} ({gesture}) is in the dialog", gesture.Length > 0 && text.Contains(line));
+        }
+    }
+
+    /// <summary>The two entries the hardcoded dialog had actually lost.</summary>
+    private static void TheTwoMissingShortcutsAreBack()
+    {
+        string text = AppCommands.ShortcutsText();
+        Check("Ctrl+O Open log is listed", text.Contains("Ctrl+O") && text.Contains("Open log"));
+        Check("Ctrl+G Go to time is listed", text.Contains("Ctrl+G") && text.Contains("Go to time"));
+    }
+
+    // ---------------- Settings ----------------
+
+    /// <summary>Points AppSettings at a scratch file so the user's real settings stay untouched.</summary>
+    private static string ScratchSettings()
+    {
+        string path = Path.Combine(Path.GetTempPath(), $"canterminal-test-{Guid.NewGuid():N}.json");
+        AppSettings.SettingsPath = path;
+        return path;
+    }
+
+    /// <summary>Every persisted session setting must survive Save → Load unchanged.</summary>
+    private static void SessionSettingsRoundTrip()
+    {
+        string path = ScratchSettings();
+        try
+        {
+            var saved = new AppSettings
+            {
+                Channels = "CAN1@250000,CAN2",
+                Bitrate = 250_000,
+                FdBitrate = 5_000_000,
+                FdEnabled = true,
+                Layout = 2,
+                FontSize = 15,
+                Timestamps = nameof(TimestampMode.Delta),
+                HistoryCapacity = 123_456,
+                ApiServer = false,
+                ApiPort = 4242,
+                CycleMs = 250,
+                WindowWidth = 1600,
+                WindowHeight = 900,
+                WindowLeft = 10,
+                WindowTop = 20,
+                WindowMaximized = true,
+            };
+            saved.Save();
+            var loaded = AppSettings.Load();
+            Check("channels round-trip", loaded.Channels == saved.Channels);
+            Check("bitrates round-trip", loaded.Bitrate == 250_000 && loaded.FdBitrate == 5_000_000 && loaded.FdEnabled);
+            Check("layout and font round-trip", loaded.Layout == 2 && loaded.FontSize == 15);
+            Check("timestamp mode round-trips", loaded.Timestamps == nameof(TimestampMode.Delta));
+            Check("history round-trips", loaded.HistoryCapacity == 123_456);
+            Check("api server round-trips", !loaded.ApiServer && loaded.ApiPort == 4242);
+            Check("cycle time round-trips", loaded.CycleMs == 250);
+            Check("window placement round-trips",
+                  loaded is { WindowWidth: 1600, WindowHeight: 900, WindowLeft: 10, WindowTop: 20, WindowMaximized: true });
+        }
+        finally { File.Delete(path); }
+    }
+
+    /// <summary>A corrupt file must read as "no settings", not fail startup.</summary>
+    private static void AGarbageFileYieldsDefaults()
+    {
+        string path = ScratchSettings();
+        try
+        {
+            File.WriteAllText(path, "{ this is not json");
+            var loaded = AppSettings.Load();
+            Check("garbage file falls back to defaults",
+                  loaded.Bitrate == 500_000 && loaded.FontSize == 12 && loaded.ApiServer);
+        }
+        finally { File.Delete(path); }
+    }
+
+    /// <summary>
+    /// Out-of-range values in a hand-edited file are clamped to what the dialogs allow, so the
+    /// program cannot start somewhere its own UI cannot reach — a 0 pt font, layout 7.
+    /// </summary>
+    private static void AHandEditedFileIsClamped()
+    {
+        string path = ScratchSettings();
+        try
+        {
+            File.WriteAllText(path,
+                """{ "FontSize": 0, "HistoryCapacity": -5, "ApiPort": 99999, "Layout": 7, "Timestamps": "Sideways" }""");
+            var loaded = AppSettings.Load();
+            Check("font size clamped", loaded.FontSize == 8);
+            Check("history clamped", loaded.HistoryCapacity == TraceBuffer.MinCapacity);
+            Check("port clamped", loaded.ApiPort == 65535);
+            Check("layout clamped", loaded.Layout == 2);
+            Check("unknown timestamp mode dropped", loaded.Timestamps is null);
+        }
+        finally { File.Delete(path); }
+    }
+
+    // ---------------- Log size estimate ----------------
+
+    /// <summary>
+    /// The large-file warning fires off these, before the read it warns about. The ASC figure is
+    /// measured (56.8 B/frame on a real 483,621-frame capture); MDF4 deliberately overestimates
+    /// (27 B/record measured, divisor 16) so a ##DZ-compressed file still warns.
+    /// </summary>
+    private static void EstimatesAreFormatSpecific()
+    {
+        var asc = new AscLogReader();
+        var mdf = new Mdf4LogReader();
+        Check("ASC estimate lands near the measured capture",
+              asc.EstimateFrames(27_470_143) is > 450_000 and < 520_000);
+        Check("MDF4 counts more frames per byte than ASC",
+              mdf.EstimateFrames(1_000_000) > asc.EstimateFrames(1_000_000));
+        Check("MDF4 overestimates the uncompressed case",
+              mdf.EstimateFrames(13_063_392) >= 483_621);
     }
 
     // ---------------- helpers ----------------

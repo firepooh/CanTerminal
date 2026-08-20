@@ -126,8 +126,13 @@ public partial class ChannelPane : UserControl
     /// <summary>Points the pane at a channel. Used by the View menu; ignores names it does not have.</summary>
     public void SelectChannel(string channel)
     {
-        int index = ChannelItems.ToList().FindIndex(c => c.Equals(channel, StringComparison.OrdinalIgnoreCase));
-        if (index >= 0) ChannelCombo.SelectedIndex = index;
+        var items = ChannelItems;
+        for (int i = 0; i < items.Count; i++)
+            if (items[i].Equals(channel, StringComparison.OrdinalIgnoreCase))
+            {
+                ChannelCombo.SelectedIndex = i;
+                return;
+            }
     }
 
     /// <summary>Switches between the trace list and the aggregate grid.</summary>

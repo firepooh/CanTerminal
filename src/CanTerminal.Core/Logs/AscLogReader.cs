@@ -32,6 +32,9 @@ public sealed class AscLogReader : ILogReader
     public bool CanRead(string path) =>
         System.IO.Path.GetExtension(path).Equals(".asc", StringComparison.OrdinalIgnoreCase);
 
+    /// <summary>Measured: a 27.5 MB capture of 483,621 frames is 56.8 bytes of text per frame.</summary>
+    public long EstimateFrames(long fileSize) => fileSize / 56;
+
     /// <summary>Verbatim skipped lines kept for the report. Enough to see a pattern, not a second copy of the file.</summary>
     private const int MaxSamples = 12;
 
