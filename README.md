@@ -11,7 +11,22 @@ ValueCAN ── icsneo40.dll ── CanTerminal.exe (WPF 모니터)
                               └─ CanTerminal.Mcp (stdio MCP 서버) ← Claude Code 등
 ```
 
-## 빌드 / 실행
+## 받기 / 빌드 / 실행
+
+### 릴리스 받기
+
+[Releases](https://github.com/firepooh/CanTerminal/releases)에 태그마다 zip 두 개가 올라갑니다:
+
+| | |
+|---|---|
+| `CanTerminal-win-x64.zip` | 실행 PC에 **.NET 10 Desktop Runtime** 필요 (작음) |
+| `CanTerminal-win-x64-standalone.zip` | 런타임 포함, 설치 없이 실행 (큼) |
+
+둘 다 `CanTerminal.exe` + `CanTerminal.Mcp.exe` + `python/` 클라이언트가 들어 있습니다.
+**`icsneo40.dll`은 넣지 않습니다** — Intrepid 드라이버 설치본의 일부입니다. 실장비를 쓰려면
+드라이버가 필요하고, 로그 열람(ASC/MDF4)과 가상 버스는 없어도 동작합니다.
+
+### 소스에서 빌드
 
 ```bash
 dotnet build CanTerminal.slnx
@@ -595,6 +610,44 @@ dotnet run --project tests/CanTerminal.RegressionTests
 메모리 해제, DBC 짧은 프레임 억제, XCP 디코더 3건. 각 항목은 수정 전에 실제로 실패하던
 것이라 일반적인 건강 검진이 아니라 구체적으로 무엇이 잘못됐었는지를 기록합니다.
 전부 PASS 상태로 커밋됩니다.
+
+## 버전과 릴리스
+
+버전은 [`Directory.Build.props`](Directory.Build.props)의 `<Version>` 하나에서 나오고,
+**모든 어셈블리가 같은 값을 찍습니다.** 표시하는 곳은 세 군데입니다:
+
+| 어디 | 무엇 |
+|---|---|
+| `Help ▸ About CanTerminal` | 버전 · .NET 런타임/아키텍처 · `icsneo40.dll` 설치 여부 · 저장소 링크 |
+| TCP API `status` / `hello` | `"version"` 필드 |
+| MCP `initialize` | `serverInfo.version` |
+
+읽는 값은 어셈블리 버전이 아니라 **`AssemblyInformationalVersion`** 입니다. 그래야 prerelease
+라벨이 살아남습니다 — `v1.2.0-rc1` 빌드의 어셈블리 버전은 `1.2.0.0`이라, 그걸 보고하면 rc를
+정식 릴리스와 구분할 수 없습니다. SDK가 붙이는 `+<커밋 해시>` 접미사만 떼고 씁니다.
+
+### 태그를 밀면 릴리스가 나옵니다
+
+```bash
+git tag -a v1.1.0 -m "..."
+git push origin v1.1.0
+```
+
+[`.github/workflows/build.yml`](.github/workflows/build.yml)이 Windows 러너에서:
+
+1. 태그에서 버전을 뽑아 `-p:Version=`으로 빌드 (태그가 아니면 `1.0.0-dev.<run>`)
+2. **회귀 테스트 + 종단간 테스트를 돌립니다** — 통과 못 하면 릴리스가 안 나옵니다
+3. framework-dependent / self-contained 두 벌을 single-file로 publish
+4. zip 두 개를 만들어 아티팩트로 올리고, **태그일 때만** GitHub Release를 만듭니다
+
+이미 있는 태그로 다시 뽑아야 하면 태그를 지웠다 밀지 말고 Actions에서 `Run workflow`로
+그 태그를 ref로 골라 실행하면 됩니다 (`workflow_dispatch`).
+
+로컬에서 버전을 바꿔 확인하려면:
+
+```bash
+dotnet build CanTerminal.slnx -c Release -p:Version=1.2.3-rc1
+```
 
 ## 하드웨어 검증 상태
 

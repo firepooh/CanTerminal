@@ -18,7 +18,7 @@ namespace CanTerminal.App;
 
 public partial class MainWindow : Window
 {
-    private const string RepoUrl = "https://github.com/firepooh/CanTerminal";
+    private static string RepoUrl => AppInfo.RepositoryUrl;
 
     /// <summary>
     /// How long one flush may hold the UI thread. A count-based budget cannot bound this: the
@@ -1936,13 +1936,8 @@ public partial class MainWindow : Window
         }
     }
 
-    private void About_Click(object sender, RoutedEventArgs e)
-    {
-        string version = Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "dev";
-        MessageBox.Show(this,
-            $"CanTerminal {version}\nCAN monitor for Intrepid ValueCAN / neoVI.\n\n{RepoUrl}",
-            "About CanTerminal", MessageBoxButton.OK, MessageBoxImage.Information);
-    }
+    private void About_Click(object sender, RoutedEventArgs e) =>
+        new AboutDialog { Owner = this }.ShowDialog();
 
     private void Window_Closing(object sender, System.ComponentModel.CancelEventArgs e)
     {

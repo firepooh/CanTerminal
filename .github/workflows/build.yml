@@ -1,0 +1,138 @@
+name: Build
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ main ]
+  # 이미 존재하는 태그로 릴리스를 다시 뽑을 때. 태그를 지웠다 다시 밀 필요 없이
+  # Actions 에서 그 태그를 ref 로 골라 실행하면 된다.
+  workflow_dispatch:
+
+permissions:
+  contents: write   # 태그 푸시 시 Release 생성용
+
+jobs:
+  build:
+    runs-on: windows-latest    # WPF 앱이라 Windows 러너가 필요하다
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # 태그(v1.2.3)면 태그에서 버전을 뽑고, 일반 푸시/PR 이면 개발 버전을 붙인다.
+      # 이 값이 -p:Version 으로 모든 어셈블리에 찍히고, About 창과 TCP API 의 status,
+      # MCP serverInfo 가 전부 그것을 읽는다 (Directory.Build.props 참조).
+      - name: Determine version
+        id: ver
+        shell: pwsh
+        run: |
+          if ('${{ github.ref }}'.StartsWith('refs/tags/v')) {
+            $v = '${{ github.ref_name }}'.TrimStart('v')
+          } else {
+            $v = "1.0.0-dev.${{ github.run_number }}"
+          }
+          "version=$v" >> $env:GITHUB_OUTPUT
+          Write-Host "Version: $v"
+
+      - name: Build
+        run: dotnet build CanTerminal.slnx -c Release -p:Version=${{ steps.ver.outputs.version }}
+
+      # 회귀 테스트는 콘솔 앱이라 종료 코드로 실패를 알린다 (dotnet test 프로젝트가 아니다).
+      - name: Regression tests
+        run: dotnet run --project tests/CanTerminal.RegressionTests -c Release --no-build
+
+      # 가상 버스 + TCP API + MCP 서버를 실제로 띄워 종단간 확인한다. 하드웨어가 필요 없다.
+      - name: End-to-end tests (virtual bus, TCP API, MCP)
+        shell: pwsh
+        env:
+          CANTERMINAL_CONFIG: Release
+        run: python tests/smoke_test.py
+
+      # ── 프레임워크 의존(작음, 실행 PC 에 .NET 10 Desktop Runtime 필요) ──
+      - name: Publish app (framework-dependent)
+        run: >
+          dotnet publish src/CanTerminal.App/CanTerminal.App.csproj -c Release -r win-x64
+          --self-contained false -p:PublishSingleFile=true
+          -p:Version=${{ steps.ver.outputs.version }}
+          -o fdd/app
+      - name: Publish MCP server (framework-dependent)
+        run: >
+          dotnet publish src/CanTerminal.Mcp/CanTerminal.Mcp.csproj -c Release -r win-x64
+          --self-contained false -p:PublishSingleFile=true
+          -p:Version=${{ steps.ver.outputs.version }}
+          -o fdd/mcp
+
+      # ── self-contained(큼, .NET 런타임 포함 — 런타임 설치 없이 실행) ──
+      - name: Publish app (self-contained)
+        run: >
+          dotnet publish src/CanTerminal.App/CanTerminal.App.csproj -c Release -r win-x64
+          --self-contained true -p:PublishSingleFile=true
+          -p:EnableCompressionInSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:Version=${{ steps.ver.outputs.version }}
+          -o sc/app
+      - name: Publish MCP server (self-contained)
+        run: >
+          dotnet publish src/CanTerminal.Mcp/CanTerminal.Mcp.csproj -c Release -r win-x64
+          --self-contained true -p:PublishSingleFile=true
+          -p:EnableCompressionInSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:Version=${{ steps.ver.outputs.version }}
+          -o sc/mcp
+
+      # 앱 + MCP 서버 + python 클라이언트를 한 zip 으로 묶는다.
+      #  - MCP 서버는 앱 옆에 있어야 .mcp.json 의 상대 경로가 성립한다.
+      #  - icsneo40.dll 은 넣지 않는다: Intrepid 드라이버 설치본의 일부이고 시스템에 깔린다.
+      - name: Package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory dist | Out-Null
+
+          function New-Stage([string]$name, [string]$appDir, [string]$mcpDir) {
+            $stage = "stage/$name"
+            New-Item -ItemType Directory $stage -Force | Out-Null
+            Copy-Item "$appDir/CanTerminal.exe" $stage
+            Copy-Item "$mcpDir/CanTerminal.Mcp.exe" $stage
+            Copy-Item 'README.md', 'LICENSE', 'THIRD-PARTY-NOTICES.md' $stage
+            # 파이썬 테스트에서 쓰는 경량 클라이언트 (pip install -e python)
+            Copy-Item 'python' "$stage/python" -Recurse
+            Compress-Archive -Path "$stage/*" -DestinationPath "dist/$name.zip"
+          }
+
+          New-Stage 'CanTerminal-win-x64' 'fdd/app' 'fdd/mcp'
+          New-Stage 'CanTerminal-win-x64-standalone' 'sc/app' 'sc/mcp'
+
+          Write-Host '--- 배포 zip ---'
+          Get-ChildItem dist | Format-Table Name, @{n='MB';e={[math]::Round($_.Length/1MB,1)}}
+          Write-Host '--- zip 내용(framework-dependent) ---'
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $z = [System.IO.Compression.ZipFile]::OpenRead("$pwd/dist/CanTerminal-win-x64.zip")
+          try { $z.Entries | ForEach-Object { '{0,-52} {1,8:N1} KB' -f $_.FullName, ($_.Length/1KB) } }
+          finally { $z.Dispose() }
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: CanTerminal-win-x64
+          path: dist/*
+
+      # --notes 와 --generate-notes 를 함께 쓴다: GitHub API 계약상 body 가 자동 생성 노트
+      # **앞에** 붙는다. 드라이버 안내를 맨 위에 두고 커밋 목록은 그대로 받기 위함.
+      - name: Create Release (tag push only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >
+          gh release create '${{ github.ref_name }}'
+          'dist/CanTerminal-win-x64.zip#CanTerminal (win-x64, .NET 10 Desktop Runtime 필요)'
+          'dist/CanTerminal-win-x64-standalone.zip#CanTerminal standalone (런타임 포함)'
+          --title 'CanTerminal ${{ github.ref_name }}'
+          --notes '실장비를 쓰려면 Intrepid 드라이버(icsneo40.dll)가 설치돼 있어야 합니다. 로그 파일 열람(ASC/MDF4)과 가상 버스는 드라이버 없이도 동작합니다.'
+          --generate-notes

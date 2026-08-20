@@ -1,0 +1,37 @@
+<Window x:Class="CanTerminal.App.AboutDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="About CanTerminal"
+        Icon="pack://application:,,,/CanTerminal;component/canterminal.ico"
+        Width="460" SizeToContent="Height" ResizeMode="NoResize"
+        ShowInTaskbar="False" WindowStartupLocation="CenterOwner">
+    <Grid Margin="22,20">
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="Auto"/>
+            <ColumnDefinition Width="*"/>
+        </Grid.ColumnDefinitions>
+
+        <Image Grid.Column="0" Source="pack://application:,,,/CanTerminal;component/canterminal.ico"
+               Width="56" Height="56" VerticalAlignment="Top" Margin="0,2,18,0"
+               RenderOptions.BitmapScalingMode="HighQuality"/>
+
+        <StackPanel Grid.Column="1">
+            <TextBlock Text="CanTerminal" FontSize="18" FontWeight="Bold" Foreground="#1E2833"/>
+            <TextBlock x:Name="VersionText" Margin="0,3,0,0" FontFamily="Consolas" FontSize="12"
+                       Foreground="#6B7783"/>
+
+            <TextBlock Margin="0,12,0,0" TextWrapping="Wrap" FontSize="12" LineHeight="18"
+                       Foreground="#4A5764"
+                       Text="CAN monitor for Intrepid ValueCAN / neoVI — trace and aggregate views, DBC and XCP decoding, offline replay of ASC and MDF4 logs, and a local JSON API shared with python and MCP clients."/>
+
+            <TextBlock x:Name="RuntimeText" Margin="0,12,0,0" FontSize="11" Foreground="#7A858F"/>
+            <TextBlock x:Name="DriverText" Margin="0,2,0,0" FontSize="11" Foreground="#7A858F"/>
+            <TextBlock Margin="0,3,0,0" FontSize="11">
+                <Hyperlink Click="Repo_Click" Foreground="#1F6FB2" TextDecorations="{x:Null}">github.com/firepooh/CanTerminal</Hyperlink>
+            </TextBlock>
+
+            <Button Content="OK" Width="90" Height="30" Margin="0,20,0,0" HorizontalAlignment="Right"
+                    IsDefault="True" IsCancel="True" Click="Ok_Click"/>
+        </StackPanel>
+    </Grid>
+</Window>

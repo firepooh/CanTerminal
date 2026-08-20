@@ -1,4 +1,5 @@
 using System.Net.Sockets;
+using System.Reflection;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -39,6 +40,19 @@ void WriteError(JsonNode? id, int code, string message) =>
         ["error"] = new JsonObject { ["code"] = code, ["message"] = message },
     });
 
+// This build's version. Read from this assembly rather than taken from Core — the relay
+// deliberately has no reference to it, and the repository stamps every assembly with one version.
+string serverVersion = ReadVersion();
+
+static string ReadVersion()
+{
+    string informational = Assembly.GetExecutingAssembly()
+        .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "";
+    if (informational.Length == 0) return "dev";
+    int plus = informational.IndexOf('+');          // the SDK appends "+<commit sha>"
+    return plus > 0 ? informational[..plus] : informational;
+}
+
 string? line;
 while ((line = Console.ReadLine()) != null)
 {
@@ -60,7 +74,7 @@ while ((line = Console.ReadLine()) != null)
                 {
                     ["protocolVersion"] = p?["protocolVersion"]?.DeepClone() ?? "2025-03-26",
                     ["capabilities"] = new JsonObject { ["tools"] = new JsonObject() },
-                    ["serverInfo"] = new JsonObject { ["name"] = "canterminal", ["version"] = "1.0.0" },
+                    ["serverInfo"] = new JsonObject { ["name"] = "canterminal", ["version"] = serverVersion },
                 });
                 break;
 

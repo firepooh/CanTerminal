@@ -1,0 +1,17 @@
+<Project>
+
+  <PropertyGroup>
+    <!-- The version every assembly in the repo carries. CI overrides it from the tag with
+         -p:Version=..., so a tagged build is stamped with the tag and nothing has to be edited
+         to cut a release; this value is what a local build reports. -->
+    <Version>1.0.0</Version>
+
+    <Product>CanTerminal</Product>
+    <Authors>firepooh</Authors>
+    <Company>firepooh</Company>
+    <Copyright>Copyright (c) 2026 firepooh</Copyright>
+    <RepositoryUrl>https://github.com/firepooh/CanTerminal</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+  </PropertyGroup>
+
+</Project>

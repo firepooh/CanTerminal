@@ -202,7 +202,7 @@ public sealed class TcpApiServer : IDisposable
                 {
                     ["op"] = op == "hello" ? "hello" : "status",
                     ["app"] = "CanTerminal",
-                    ["version"] = "1.0",
+                    ["version"] = AppInfo.Version,
                     ["connected"] = st.Connected,
                     ["adapter"] = st.Adapter,
                     ["channels"] = new JsonArray(st.Channels.Select(c => (JsonNode)c).ToArray()),
