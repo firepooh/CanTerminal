@@ -48,6 +48,11 @@ internal static class Program
         Mdf4RefusesWhatItDoesNotImplement();
         Mdf4ReadsLayoutFromTheFile();
 
+        Section("Replay");
+        ReplayFollowsItsOwnClock();
+        ReplayBudgetHoldsTheClockBack();
+        SeekingForwardAppendsAndBackRebuilds();
+
         Section("Log into the hub");
         BulkLoadDoesNotNotifyPerFrame();
         ReannotateRunsOncePerFrameInOrder();
@@ -514,6 +519,84 @@ internal static class Program
               $"{log.Frames[0].Channel},{log.Frames[2].Channel}");
         Check("a standard identifier is not marked extended", !log.Frames[2].IsExtended);
         Check("nothing was skipped", log.SkippedLines == 0, log.SkippedLines.ToString());
+    }
+
+    // ---------------- replay ----------------
+
+    /// <summary>A thousand frames per second of file time, sixty seconds of it.</summary>
+    private static CanFrame[] Recording() =>
+        [.. Enumerable.Range(0, 60_000).Select(i => new CanFrame
+        {
+            Timestamp = i * 0.001, Channel = "CAN1", ArbId = 0x100, Data = [(byte)i],
+        })];
+
+    private static void ReplayFollowsItsOwnClock()
+    {
+        var player = new LogPlayer(Recording());
+        Check("it starts at the beginning, stopped", !player.IsPlaying && player.EmittedCount == 0);
+
+        player.Play();
+        int emitted = 0;
+        for (int i = 0; i < 20; i++) emitted += player.Advance(0.05, 4000).Count;   // one second of wall time
+        Check("one second at 1x is one second of the file",
+              Math.Abs(player.Position - 1.0) < 0.01, player.Position.ToString("F3"));
+        Check("and hands over the frames that fall in it",
+              Math.Abs(emitted - 1000) <= 2, emitted.ToString());
+
+        player.Speed = 10;
+        for (int i = 0; i < 20; i++) player.Advance(0.05, 40_000);
+        Check("10x covers ten seconds in the same wall time",
+              Math.Abs(player.Position - 11.0) < 0.02, player.Position.ToString("F3"));
+
+        player.Pause();
+        double held = player.Position;
+        player.Advance(0.05, 4000);
+        Check("a paused replay does not move", player.Position == held);
+
+        player.Speed = 0;
+        player.Play();
+        while (!player.AtEnd) player.Advance(0.05, 40_000);
+        Check("it stops itself at the end", !player.IsPlaying && player.Position == player.End);
+        Check("every frame was handed over", player.EmittedCount == 60_000, player.EmittedCount.ToString("N0"));
+
+        player.Play();
+        Check("playing from the end starts over", player.EmittedCount == 0 && player.IsPlaying);
+    }
+
+    /// <summary>
+    /// The budget is what stops a fast replay handing the UI thread more frames than it can draw.
+    /// The position has to be held back with it — a clock that ran on regardless would claim to be
+    /// somewhere the display has not reached.
+    /// </summary>
+    private static void ReplayBudgetHoldsTheClockBack()
+    {
+        var player = new LogPlayer(Recording()) { Speed = 100 };
+        player.Play();
+        var due = player.Advance(0.05, 100);
+        Check("no more than the budget is handed over", due.Count == 100, due.Count.ToString());
+        Check("and the clock stops where the frames did",
+              player.Position < 0.2, player.Position.ToString("F3"));
+    }
+
+    private static void SeekingForwardAppendsAndBackRebuilds()
+    {
+        var player = new LogPlayer(Recording());
+
+        var gap = player.SeekTo(10, out bool rebuild);
+        Check("seeking forward asks for no rebuild", !rebuild);
+        Check("and returns just the frames in between",
+              gap is { Count: 10_000 }, gap?.Count.ToString() ?? "null");
+        Check("the position is where it was asked for", Math.Abs(player.Position - 10) < 1e-9);
+
+        var back = player.SeekTo(4, out rebuild);
+        Check("seeking back asks for a rebuild", rebuild && back is null);
+        Check("and the frames to replay are those up to it",
+              player.Played().Count == 4000, player.Played().Count.ToString());
+
+        player.SeekTo(-5, out _);
+        Check("seeking before the start clamps to it", player.Position == player.Start);
+        player.SeekTo(1e9, out _);
+        Check("and past the end clamps to that", player.Position == player.End);
     }
 
     // ---------------- log into the hub ----------------

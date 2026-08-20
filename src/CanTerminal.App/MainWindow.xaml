@@ -126,7 +126,7 @@
         <CommandBinding Command="{x:Static local:AppCommands.FontSmaller}"    Executed="FontSmaller_Executed"/>
         <CommandBinding Command="{x:Static local:AppCommands.FontReset}"      Executed="FontReset_Executed"/>
         <CommandBinding Command="{x:Static local:AppCommands.JumpToLive}"     Executed="JumpToLive_Executed"/>
-        <CommandBinding Command="{x:Static local:AppCommands.TogglePause}"    Executed="TogglePause_Executed"   CanExecute="CanLiveOnly"/>
+        <CommandBinding Command="{x:Static local:AppCommands.TogglePause}"    Executed="TogglePause_Executed"   CanExecute="CanTogglePause"/>
         <CommandBinding Command="{x:Static local:AppCommands.ClearAll}"       Executed="ClearAll_Executed"       CanExecute="CanLiveOnly"/>
         <CommandBinding Command="{x:Static local:AppCommands.SendFrame}"      Executed="SendFrame_Executed"      CanExecute="CanTransmit"/>
         <CommandBinding Command="{x:Static local:AppCommands.StartCyclic}"    Executed="StartCyclic_Executed"    CanExecute="CanTransmit"/>
@@ -294,6 +294,51 @@
                 <MenuItem Header="_About CanTerminal" Click="About_Click"/>
             </MenuItem>
         </Menu>
+
+        <!-- ===== replay transport: only while a log file is open =====
+             A file has a clock, and most of what the views say only means something while that
+             clock moves — the aggregate count climbs, the period settles, a byte that changes
+             lights up as it changes. Collapsed entirely when live, so the toolbar above is
+             untouched for a capture. -->
+        <Border x:Name="TransportBar" DockPanel.Dock="Top" Visibility="Collapsed"
+                Background="#FFF6DF" BorderBrush="#E4C97A" BorderThickness="0,0,0,1" Padding="12,6">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+
+                <Button x:Name="PlayButton" Grid.Column="0" Content="▶  Play" Width="92"
+                        Style="{StaticResource AccentButton}" Click="Play_Click"/>
+                <Button Grid.Column="1" Content="⏮" Width="40" Margin="8,0,0,0"
+                        Style="{StaticResource FlatButton}" Click="Rewind_Click"
+                        ToolTip="Back to the start of the file."/>
+
+                <TextBlock Grid.Column="2" Text="Speed" FontSize="12" Foreground="#6B7783"
+                           VerticalAlignment="Center" Margin="16,0,6,0"/>
+                <ComboBox x:Name="SpeedCombo" Grid.Column="3" Width="96" Height="28"
+                          SelectionChanged="Speed_Changed"
+                          ToolTip="Replay rate. 'Max' hands frames over as fast as they can be drawn."/>
+
+                <TextBlock x:Name="PositionText" Grid.Column="4" FontFamily="Consolas" FontSize="12"
+                           Foreground="#5E5030" VerticalAlignment="Center" Margin="16,0,0,0"
+                           Text="0.000 / 0.000 s"/>
+
+                <Slider x:Name="SeekSlider" Grid.Column="5" Margin="16,0,16,0" VerticalAlignment="Center"
+                        Minimum="0" Maximum="1" IsMoveToPointEnabled="True"
+                        Thumb.DragStarted="Seek_DragStarted" Thumb.DragCompleted="Seek_DragCompleted"
+                        ValueChanged="Seek_ValueChanged"
+                        ToolTip="Drag to a moment in the file. Seeking back replays from the start, which takes a moment on a large file."/>
+
+                <TextBlock x:Name="PlayedText" Grid.Column="6" FontFamily="Consolas" FontSize="11.5"
+                           Foreground="#7A858F" VerticalAlignment="Center"/>
+            </Grid>
+        </Border>
 
         <!-- ===== toolbar: only what gets touched while traffic is flowing ===== -->
         <Border x:Name="ToolbarBar" DockPanel.Dock="Top" Background="#F7F9FB" BorderBrush="#E2E8EE" BorderThickness="0,0,0,1"
