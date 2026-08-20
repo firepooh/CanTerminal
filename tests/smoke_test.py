@@ -227,9 +227,18 @@ def test_mcp() -> None:
                                       "arguments": {"id": "0C0", "channel": "CAN1", "timeout_ms": 3000}})
         check("can_wait_for (generator 0x0C0)", "Received:" in tool_text(wait), tool_text(wait))
 
-        echo = mcp.rpc("tools/call", {"name": "can_recent",
-                                      "arguments": {"count": 50, "channel": "CAN1", "id": "421"}})
-        check("can_send echo visible via can_recent", "CAFE" in tool_text(echo), tool_text(echo))
+        # The echo is published ~5 ms after can_send from a thread-pool continuation, and on a
+        # loaded CI runner that can lose to this query — poll, like the TCP section does.
+        deadline = time.monotonic() + 3.0
+        text = ""
+        while True:
+            echo = mcp.rpc("tools/call", {"name": "can_recent",
+                                          "arguments": {"count": 50, "channel": "CAN1", "id": "421"}})
+            text = tool_text(echo)
+            if "CAFE" in text or time.monotonic() >= deadline:
+                break
+            time.sleep(0.05)
+        check("can_send echo visible via can_recent", "CAFE" in text, text)
 
         recent = mcp.rpc("tools/call", {"name": "can_recent", "arguments": {"count": 5}})
         check("can_recent", "frame(s)" in tool_text(recent), tool_text(recent))
