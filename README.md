@@ -471,14 +471,23 @@ DAQ-DTO의 PID는 `ALLOC_DAQ`/`ALLOC_ODT` 시퀀스를 따라가야 DAQ/ODT 번�
 | 방법 | 동작 | 한계 |
 |---|---|---|
 | **Set IDs on channel…** | 채널을 고르고 req/rsp를 hex로 입력 (`Remove session on channel ▸`로 해제). 채널을 바꾸면 그 채널에 이미 설정된 ID 쌍이 다이얼로그에 다시 뜹니다 | — |
-| **Load IDs from A2L…** | `IF_DATA XCP_ON_CAN`의 `CAN_ID_MASTER`/`CAN_ID_SLAVE`를 읽음. **여러 파일 선택 가능** — 파일명 순서대로 열린 채널에 배정하고 결과를 표로 보여줌 | A2L이 CAN 전송 계층을 기술해야 함 |
+| **Load IDs from A2L…** | `IF_DATA XCP_ON_CAN`의 `CAN_ID_MASTER`/`CAN_ID_SLAVE`를 읽고, **어느 채널에 붙일지 배정 창**을 띄움. 캡처가 있으면 **그 ID가 실제로 관측된 채널**을 제안 | A2L이 CAN 전송 계층을 기술해야 함 |
 
 > 캡처 트래픽에서 ID 쌍을 자동으로 추측하는 기능은 없습니다. 명령/응답처럼 보이는 조합은
 > 평범한 주기 트래픽에도 흔해서, 근거가 약한 후보가 진짜 CONNECT 교환을 이기는 일이
 > 실제로 일어납니다. ID는 A2L에서 읽거나 직접 입력하는 편이 정확합니다.
 
-예를 들어 `xcp_daq2x4_p1.a2l`과 `_p2.a2l`을 함께 고르면 p1 → CAN1, p2 → CAN2로 배정되고,
-어떤 파일이 어느 채널에 갔는지 확인 창이 뜹니다 (배정을 조용히 틀리면 안 되므로).
+**A2L은 CAN ID 쌍은 알려주지만 그게 어느 버스인지는 말하지 않습니다.** 파일에 `port1` 같은
+주석이 있어도 그건 주석입니다. 그래서 배정 창을 띄우되, **로그나 캡처가 있으면 추측하지 않고
+읽습니다** — 그 ID 쌍이 실제로 어느 채널에서 관측됐는지 세어서 제안하고, 근거를 옆에 적습니다:
+
+```
+xcp_daq2x4_p1.a2l   master 0x18FFA201 / slave 0x18FFA301 — seen on CAN1 (209,423 frames)   [ CAN1 ▾ ]
+xcp_daq2x4_p2.a2l   master 0x18FFA202 / slave 0x18FFA302 — seen on CAN2 (209,444 frames)   [ CAN2 ▾ ]
+```
+
+캡처에 그 ID가 없으면 아무 채널도 고르지 않고 `not seen in the capture`라고 적습니다 —
+근거 없이 배정하지 않습니다. 제안은 언제나 콤보로 뒤집을 수 있습니다.
 
 > 캡처 중간부터 붙어서 DAQ 할당을 못 본 경우, DAQ/ODT 번호를 추측하지 않고
 > `DAQ-DTO (PID = 0x02)`처럼 표시하고 이유를 코멘트에 남깁니다.

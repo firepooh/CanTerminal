@@ -1360,52 +1360,99 @@ public partial class MainWindow : Window
             Multiselect = true,
         };
         if (dlg.ShowDialog(this) != true) return;
+
+        List<(string Path, A2lXcpReader.Result Ids)> found;
         try
         {
-            // Sorted by name so a p1/p2 pair lands on the channels in the obvious order.
-            var found = dlg.FileNames
+            found = dlg.FileNames
                 .OrderBy(p => Path.GetFileName(p), StringComparer.OrdinalIgnoreCase)
-                .Select(p => (File: Path.GetFileName(p), Result: A2lXcpReader.Read(p)))
-                .Where(x => x.Result.HasPair)
+                .Select(p => (Path: p, Ids: A2lXcpReader.Read(p)))
+                .Where(x => x.Ids.HasPair)
                 .ToList();
-
-            if (found.Count == 0)
-            {
-                MessageBox.Show(this,
-                    "No CAN_ID_MASTER / CAN_ID_SLAVE pair found in an IF_DATA XCP_ON_CAN block.\n\n" +
-                    "The file may describe a different transport layer (Ethernet, USB, FlexRay).",
-                    "Load A2L", MessageBoxButton.OK, MessageBoxImage.Warning);
-                return;
-            }
-
-            // One file configures the selected channel; several are spread over the open
-            // channels in order. The mapping is always reported so it can be checked.
-            var targets = found.Count == 1
-                ? [SelectedXcpChannel()]
-                : AvailableChannels().Take(found.Count).ToList();
-
-            var lines = new List<string>();
-            for (int i = 0; i < found.Count && i < targets.Count; i++)
-            {
-                var (file, r) = found[i];
-                _xcpSessions[targets[i]] = new XcpConfig(r.Master!.Value, r.Slave!.Value, Channel: targets[i]);
-                lines.Add($"  {file}  →  {targets[i]}   master 0x{r.Master:X} / slave 0x{r.Slave:X}" +
-                          (r.Extended ? "  (29-bit)" : ""));
-            }
-            RebuildXcpSessions();
-            _xcpChannel = targets[0];
-
-            string skipped = found.Count > targets.Count
-                ? $"\n\n{found.Count - targets.Count} file(s) had no channel to go to — only {targets.Count} channel(s) are open."
-                : "";
-            InfoText.Text = $"XCP IDs loaded from {lines.Count} A2L file(s).";
-            MessageBox.Show(this, $"Configured:\n{string.Join("\n", lines)}{skipped}",
-                            "Load A2L", MessageBoxButton.OK, MessageBoxImage.Information);
         }
         catch (Exception ex)
         {
             MessageBox.Show(this, ex.Message, "Load A2L", MessageBoxButton.OK, MessageBoxImage.Error);
+            return;
         }
+
+        if (found.Count == 0)
+        {
+            MessageBox.Show(this,
+                "No CAN_ID_MASTER / CAN_ID_SLAVE pair found in an IF_DATA XCP_ON_CAN block.\n\n" +
+                "The file may describe a different transport layer (Ethernet, USB, FlexRay).",
+                "Load A2L", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        var channels = AvailableChannels();
+        var rows = new List<ChannelAssignDialog.Row>();
+        for (int i = 0; i < found.Count; i++)
+        {
+            var (path, ids) = found[i];
+            var (channel, note) = ChannelCarrying(ids, channels, fallback: i < channels.Count ? channels[i] : null);
+            rows.Add(new ChannelAssignDialog.Row(path, channel,
+                $"master 0x{ids.Master:X} / slave 0x{ids.Slave:X}{(note.Length == 0 ? "" : "  —  " + note)}"));
+        }
+
+        var assignments = ChannelAssignDialog.Ask(this, "Load A2L",
+            "Which channel each A2L describes. The file gives the CAN ID pair but not the bus it runs on, " +
+            "so where a capture is loaded the suggestion below comes from which channel those identifiers " +
+            "were actually seen on.",
+            rows, channels, allowShared: false);
+        if (assignments is null) return;
+
+        var byPath = found.ToDictionary(f => f.Path, f => f.Ids, StringComparer.OrdinalIgnoreCase);
+        var lines = new List<string>();
+        foreach (var (path, channel) in assignments)
+        {
+            if (channel is null) continue;
+            var ids = byPath[path];
+
+            // A pair moved to another channel must not stay on the old one.
+            foreach (var stale in _xcpSessions
+                .Where(kv => kv.Value.RequestId == ids.Master && kv.Value.ResponseId == ids.Slave)
+                .Select(kv => kv.Key).ToList())
+                _xcpSessions.Remove(stale);
+
+            _xcpSessions[channel] = new XcpConfig(ids.Master!.Value, ids.Slave!.Value, Channel: channel);
+            lines.Add($"  {Path.GetFileName(path)}  →  {channel}   master 0x{ids.Master:X} / slave 0x{ids.Slave:X}" +
+                      (ids.Extended ? "  (29-bit)" : ""));
+        }
+        if (lines.Count == 0) return;
+
+        RebuildXcpSessions();
+        _xcpChannel = assignments.FirstOrDefault(a => a.Channel is not null).Channel ?? _xcpChannel;
+        InfoText.Text = $"XCP IDs loaded from {lines.Count} A2L file(s)." +
+                        (_log is null ? "" : " The whole log has been decoded again from the start.");
+        MessageBox.Show(this, $"Configured:\n{string.Join("\n", lines)}",
+                        "Load A2L", MessageBoxButton.OK, MessageBoxImage.Information);
+    }
+
+    /// <summary>
+    /// Which channel actually carries an A2L's CAN ID pair, from what has been captured.
+    ///
+    /// The A2L names the identifiers but not the bus, so on a two-port device the two files are
+    /// distinguishable only by their identifiers — and those are already on screen. Reading the
+    /// answer off the capture beats inferring it from the order the files were named, and the
+    /// reason is shown next to the suggestion so it can be disagreed with.
+    /// </summary>
+    private (string? Channel, string Note) ChannelCarrying(
+        A2lXcpReader.Result ids, IReadOnlyList<string> channels, string? fallback)
+    {
+        if (ids.Master is not uint master || ids.Slave is not uint slave || _hub.TotalFrames == 0)
+            return (fallback, "");
+
+        var counts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (var frame in _hub.Snapshot())
+            if (frame.ArbId == master || frame.ArbId == slave)
+                counts[frame.Channel] = counts.GetValueOrDefault(frame.Channel) + 1;
+
+        if (counts.Count == 0) return (fallback, "not seen in the capture");
+
+        var best = counts.OrderByDescending(kv => kv.Value).First();
+        if (!channels.Contains(best.Key, StringComparer.OrdinalIgnoreCase)) return (fallback, "");
+        return (best.Key, $"seen on {best.Key} ({best.Value:N0} frames)");
     }
 
     /// <summary>
@@ -1553,7 +1600,11 @@ public partial class MainWindow : Window
                                  : i < channels.Count ? channels[i]
                                  : null;
 
-        var assignments = DbcAssignDialog.Ask(this, byName, channels, suggested);
+        var assignments = ChannelAssignDialog.Ask(this, "Load DBC",
+            "Which channel each database describes. Bound to the wrong one it either decodes nothing, " +
+            "or — where the two buses share an identifier — decodes it as the wrong message. Neither is announced.",
+            [.. byName.Select(f => new ChannelAssignDialog.Row(f, suggested.GetValueOrDefault(f)))],
+            channels);
         if (assignments is null) return;
         ApplyDbcAssignments(assignments);
     }
