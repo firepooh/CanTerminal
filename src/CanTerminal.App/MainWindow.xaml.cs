@@ -461,6 +461,11 @@ public partial class MainWindow : Window
     }
 
     /// <summary>Offers the freshly opened channels to every control that targets one.</summary>
+    /// <summary>
+    /// Offers a set of channels to everything that can be pointed at one. Called both when a
+    /// device opens and when a log does — a file names its channels just as a device does, and
+    /// without this the panes offer only "All" and a two-channel capture cannot be split.
+    /// </summary>
     private void OnChannelsOpened(IReadOnlyList<string> channels)
     {
         PaneA.SetChannels(channels);                                    // stays on "All" — merged timeline
@@ -560,7 +565,11 @@ public partial class MainWindow : Window
         _haveZero = true;
 
         EnterLogMode();
+        // Before the panes are offered the channels, so the reprojection each pane does when its
+        // channel is set replays from the player — which is at the start — rather than from the
+        // whole hub.
         SetUpTransport(log);
+        OnChannelsOpened(log.Channels);
         ApplyTimeBase();
         ApplyContentFilters();
         ProjectToPanes();
@@ -608,6 +617,8 @@ public partial class MainWindow : Window
             pane.ClearAll();
             pane.SetHistoryCapacity(_historyCapacity);   // back to the size the user chose
         }
+        // The file's channels go with it; a device is not open, so there are none to offer.
+        OnChannelsOpened([]);
         ExitLogMode();
         ApplyTimeBase();
         UpdateConnStatus();

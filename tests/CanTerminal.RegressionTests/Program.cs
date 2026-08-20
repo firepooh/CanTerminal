@@ -214,6 +214,13 @@ internal static class Program
         Check("a standard id is not marked extended", !log.Frames[2].IsExtended);
         Check("the header date is picked up", log.StartWall == new DateTime(2025, 1, 2, 9, 14, 24));
         Check("nothing was skipped", log.SkippedLines == 0, log.SkippedLines.ToString());
+
+        // The panes offer exactly this list, so a channel missing from it cannot be filtered to
+        // at all — the frames are there and no menu reaches them.
+        Check("every channel that carries a frame is listed",
+              log.Frames.Select(f => f.Channel).Distinct().OrderBy(c => c)
+                 .SequenceEqual(log.Channels.OrderBy(c => c)),
+              string.Join(",", log.Channels));
     }
 
     /// <summary>
