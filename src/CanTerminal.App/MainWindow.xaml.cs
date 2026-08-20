@@ -502,7 +502,7 @@ public partial class MainWindow : Window
         {
             MessageBox.Show(this,
                 $"{Path.GetFileName(path)}\n\nThis build reads " +
-                $"{string.Join(", ", LogReaders.All.Select(r => r.Description))}. MDF4 is not supported yet.",
+                $"{string.Join(", ", LogReaders.All.Select(r => r.Description))}.",
                 "Open log", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }

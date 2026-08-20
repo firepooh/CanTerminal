@@ -1,5 +1,6 @@
 using System.Collections.Specialized;
 using System.Globalization;
+using System.Text;
 using CanTerminal.App;
 using CanTerminal.Core;
 using CanTerminal.Core.Logs;
@@ -42,6 +43,10 @@ internal static class Program
         TxRequestsAreNotCountedTwice();
         WhatIsNotUnderstoodIsCounted();
         LineEndingsDoNotChangeTheFrameCount();
+
+        Section("MDF4 log reader");
+        Mdf4RefusesWhatItDoesNotImplement();
+        Mdf4ReadsLayoutFromTheFile();
 
         Section("Log into the hub");
         BulkLoadDoesNotNotifyPerFrame();
@@ -299,6 +304,216 @@ internal static class Program
               crlf.Frames.Count == 2 && lf.Frames.Count == 2
               && crlf.Frames[1].DataText == lf.Frames[1].DataText,
               $"crlf={crlf.Frames.Count} lf={lf.Frames.Count}");
+    }
+
+    // ---------------- MDF4 log reader ----------------
+
+    /// <summary>
+    /// Builds just enough of an MDF 4.10 file to exercise the reader. Deliberately lays the
+    /// CAN_DataFrame members out in an order and at offsets no real writer uses, so a reader that
+    /// assumed the common layout instead of reading the composition would decode nonsense here
+    /// and still produce the right number of frames.
+    /// </summary>
+    private static class Mdf4
+    {
+        public static byte[] Build(byte recordIdSize = 0, bool compressed = false, byte zipType = 1)
+        {
+            var file = new List<byte>();
+            file.AddRange(Encoding.ASCII.GetBytes("MDF     "));
+            file.AddRange(Encoding.ASCII.GetBytes("4.10    "));
+            file.AddRange(Encoding.ASCII.GetBytes("regtest "));
+            file.AddRange(new byte[4]);
+            file.AddRange(BitConverter.GetBytes((ushort)410));
+            while (file.Count < 64) file.Add(0);
+
+            // The header block must sit at 64, so its space is reserved before anything else is
+            // appended — writing it last and copying it down would land on top of the blocks it
+            // points at.
+            const int HeaderLength = 24 + (6 * 8) + 32;
+            file.AddRange(new byte[HeaderLength]);
+
+            // time f64 @0, then the frame members in a deliberately unusual order.
+            var members = new (string Name, byte Offset, byte Bits)[]
+            {
+                ("CAN_DataFrame.DataBytes", 8, 64),
+                ("CAN_DataFrame.ID", 16, 32),
+                ("CAN_DataFrame.DLC", 20, 8),
+                ("CAN_DataFrame.IDE", 21, 8),
+                ("CAN_DataFrame.Dir", 22, 8),
+                ("CAN_DataFrame.BusChannel", 23, 8),
+                ("CAN_DataFrame.DataLength", 24, 8),
+            };
+            const int RecordLength = 25;
+
+            long next = 0;
+            var subs = new List<long>();
+            foreach (var m in members.Reverse())
+            {
+                long name = Add(file, "##TX", [], Encoding.UTF8.GetBytes(m.Name + "\0"));
+                byte dataType = (byte)(m.Name.EndsWith("DataBytes") ? 10 : 0);
+                next = Add(file, "##CN", [next, 0, name, 0, 0, 0, 0, 0], Channel(0, 0, dataType, m.Offset, m.Bits));
+                subs.Add(next);
+            }
+            long composition = next;
+
+            long frameName = Add(file, "##TX", [], Encoding.UTF8.GetBytes("CAN_DataFrame\0"));
+            long frameChannel = Add(file, "##CN", [0, composition, frameName, 0, 0, 0, 0, 0],
+                                    Channel(0, 0, 10, 8, (RecordLength - 8) * 8));
+            long timeName = Add(file, "##TX", [], Encoding.UTF8.GetBytes("time\0"));
+            long timeChannel = Add(file, "##CN", [frameChannel, 0, timeName, 0, 0, 0, 0, 0],
+                                   Channel(2, 1, 4, 0, 64));
+
+            var records = new List<byte>();
+            (double Ts, uint Id, byte Bus, byte Ide, byte Dir, byte[] Data)[] rows =
+            [
+                (0.0127, 0x18DAF110, 1, 1, 0, [0xAD, 0x21, 0, 0, 0, 0, 0, 0]),
+                (0.1016, 0x18FFA201, 1, 1, 1, [0xFF, 0x00]),
+                (0.2000, 0x123,      2, 0, 0, [0x01, 0x02, 0x03]),
+            ];
+            foreach (var r in rows)
+            {
+                var rec = new byte[RecordLength];
+                BitConverter.GetBytes(r.Ts).CopyTo(rec, 0);
+                r.Data.CopyTo(rec, 8);
+                BitConverter.GetBytes(r.Id).CopyTo(rec, 16);
+                rec[20] = (byte)r.Data.Length;
+                rec[21] = r.Ide;
+                rec[22] = r.Dir;
+                rec[23] = r.Bus;
+                rec[24] = (byte)r.Data.Length;
+                records.AddRange(rec);
+            }
+
+            long data;
+            if (compressed)
+            {
+                var payload = new List<byte>();
+                payload.AddRange(BitConverter.GetBytes((ushort)0x5444));      // "DT"
+                payload.Add(zipType);
+                payload.Add(0);
+                payload.AddRange(BitConverter.GetBytes((uint)0));
+                payload.AddRange(BitConverter.GetBytes((ulong)records.Count));
+                payload.AddRange(BitConverter.GetBytes((ulong)0));
+                data = Add(file, "##DZ", [], payload.ToArray());
+            }
+            else
+            {
+                data = Add(file, "##DT", [], records.ToArray());
+            }
+
+            long channelGroup = Add(file, "##CG", [0, timeChannel, 0, 0, 0, 0], Group(rows.Length, RecordLength));
+            var dgData = new byte[8];
+            dgData[0] = recordIdSize;
+            long dataGroup = Add(file, "##DG", [0, channelGroup, data, 0], dgData);
+
+            var hd = new byte[32];
+            BitConverter.GetBytes(1_735_000_000_000_000_000UL).CopyTo(hd, 0);
+            hd[12] = 0x01;                                                    // stamp is local time
+
+            var bytes = file.ToArray();
+            var header = new List<byte>();
+            header.AddRange(Encoding.ASCII.GetBytes("##HD"));
+            header.AddRange(new byte[4]);
+            header.AddRange(BitConverter.GetBytes((long)HeaderLength));
+            header.AddRange(BitConverter.GetBytes(6L));
+            foreach (long link in new[] { dataGroup, 0L, 0L, 0L, 0L, 0L })
+                header.AddRange(BitConverter.GetBytes(link));
+            header.AddRange(hd);
+            header.CopyTo(0, bytes, 64, HeaderLength);
+            return bytes;
+        }
+
+        private static byte[] Channel(byte type, byte sync, byte dataType, int byteOffset, int bits)
+        {
+            var d = new byte[72];
+            d[0] = type; d[1] = sync; d[2] = dataType; d[3] = 0;
+            BitConverter.GetBytes(byteOffset).CopyTo(d, 4);
+            BitConverter.GetBytes(bits).CopyTo(d, 8);
+            return d;
+        }
+
+        private static byte[] Group(int cycles, int recordBytes)
+        {
+            var d = new byte[32];
+            BitConverter.GetBytes((long)cycles).CopyTo(d, 8);
+            BitConverter.GetBytes((ushort)0x06).CopyTo(d, 16);               // bus event
+            BitConverter.GetBytes(recordBytes).CopyTo(d, 24);
+            return d;
+        }
+
+        private static long Add(List<byte> file, string kind, long[] links, byte[] data)
+        {
+            while (file.Count % 8 != 0) file.Add(0);
+            long at = file.Count;
+            file.AddRange(Encoding.ASCII.GetBytes(kind));
+            file.AddRange(new byte[4]);
+            file.AddRange(BitConverter.GetBytes((long)(24 + links.Length * 8 + data.Length)));
+            file.AddRange(BitConverter.GetBytes((long)links.Length));
+            foreach (long l in links) file.AddRange(BitConverter.GetBytes(l));
+            file.AddRange(data);
+            return at;
+        }
+    }
+
+    private static LogFile ReadMdf(byte[] bytes)
+    {
+        string path = Path.Combine(Path.GetTempPath(), $"canterminal_test_{Guid.NewGuid():N}.mf4");
+        File.WriteAllBytes(path, bytes);
+        try { return new Mdf4LogReader().Read(path); }
+        finally { try { File.Delete(path); } catch { } }
+    }
+
+    /// <summary>
+    /// The whole safety argument for reading this format: MDF4 carries no checksum, so a block
+    /// decoded on a guess passes every consistency check the format offers. Anything not
+    /// implemented has to be refused, and the message has to say which block it was.
+    /// </summary>
+    private static void Mdf4RefusesWhatItDoesNotImplement()
+    {
+        string Refusal(Func<LogFile> read)
+        {
+            try { read(); return ""; }
+            catch (Exception ex) { return ex.Message; }
+        }
+
+        string unsorted = Refusal(() => ReadMdf(Mdf4.Build(recordIdSize: 1)));
+        Check("an unsorted data group is refused, by name",
+              unsorted.Contains("unsorted", StringComparison.OrdinalIgnoreCase), unsorted);
+
+        string transposed = Refusal(() => ReadMdf(Mdf4.Build(compressed: true, zipType: 1)));
+        Check("transposed deflate is refused rather than guessed at",
+              transposed.Contains("zip type 1", StringComparison.OrdinalIgnoreCase)
+              || transposed.Contains("transposed", StringComparison.OrdinalIgnoreCase), transposed);
+
+        string notMdf = Refusal(() => ReadMdf(Encoding.ASCII.GetBytes(new string('x', 200))));
+        Check("a file that is not MDF at all is refused",
+              notMdf.Contains("MDF", StringComparison.Ordinal), notMdf);
+    }
+
+    /// <summary>
+    /// The members are laid out at offsets no real writer uses, so this only passes if the reader
+    /// took the layout from the file's own composition block.
+    /// </summary>
+    private static void Mdf4ReadsLayoutFromTheFile()
+    {
+        var log = ReadMdf(Mdf4.Build());
+        Check("three records give three frames", log.Frames.Count == 3, log.Frames.Count.ToString());
+        if (log.Frames.Count != 3) return;
+
+        var a = log.Frames[0];
+        Check("identifier, extended flag and payload come out right",
+              a.ArbId == 0x18DAF110 && a.IsExtended && a.DataText == "AD21000000000000", a.DataText);
+        Check("the timestamp is the master channel's",
+              a.Timestamp == 0.0127, a.Timestamp.ToString(CultureInfo.InvariantCulture));
+        Check("Dir marks a transmitted frame", log.Frames[1].Direction == FrameDirection.Tx);
+        Check("DataLength trims the payload to its real length",
+              log.Frames[1].Data.Length == 2 && log.Frames[2].Data.Length == 3,
+              $"{log.Frames[1].Data.Length},{log.Frames[2].Data.Length}");
+        Check("BusChannel names the channel",
+              log.Frames[0].Channel == "CAN1" && log.Frames[2].Channel == "CAN2",
+              $"{log.Frames[0].Channel},{log.Frames[2].Channel}");
+        Check("a standard identifier is not marked extended", !log.Frames[2].IsExtended);
+        Check("nothing was skipped", log.SkippedLines == 0, log.SkippedLines.ToString());
     }
 
     // ---------------- log into the hub ----------------

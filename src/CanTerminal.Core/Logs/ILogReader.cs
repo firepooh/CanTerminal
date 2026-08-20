@@ -66,18 +66,12 @@ public interface ILogReader
 /// <summary>
 /// The formats this build can open.
 ///
-/// MDF4 is deliberately absent. The one MDF4 sample that carries frames is a byte-for-byte
-/// re-encoding of an ASC file that is always present upstream of it, and the other is a
-/// signal-only file with no frame channel at all — so a reader would add no readable data today
-/// while bringing in a decoder whose failures are silent: MDF4 carries no checksum, and a
-/// DZBLOCK read without the transposition step still satisfies every arithmetic invariant the
-/// format offers while producing plausible nonsense. When MDF4 does arrive it belongs here as
-/// one more entry, and any block it has not implemented must be refused by name rather than
-/// decoded on a best effort.
+/// Order matters only in that <see cref="For"/> takes the first reader that claims a path, and
+/// the readers claim by extension, so they do not overlap.
 /// </summary>
 public static class LogReaders
 {
-    public static IReadOnlyList<ILogReader> All { get; } = [new AscLogReader()];
+    public static IReadOnlyList<ILogReader> All { get; } = [new AscLogReader(), new Mdf4LogReader()];
 
     public static ILogReader? For(string path) => All.FirstOrDefault(r => r.CanRead(path));
 
