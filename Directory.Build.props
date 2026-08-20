@@ -8,7 +8,7 @@
          Convention: next planned release + "-dev", bumped right after each tag. A plain "1.1.0"
          here would make a build off somebody's desk indistinguishable from the published
          v1.1.0. CI appends ".<run number>" for untagged builds (see build.yml). -->
-    <Version>1.2.0-dev</Version>
+    <Version>1.3.0-dev</Version>
 
     <Product>CanTerminal</Product>
     <Authors>firepooh</Authors>
