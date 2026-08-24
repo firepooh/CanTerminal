@@ -30,7 +30,12 @@ public partial class MainWindow : Window
     private const int DisplayBacklogCap = 150_000;
 
     private static readonly int[] Bitrates = [125_000, 250_000, 500_000, 1_000_000];
-    private static readonly int[] FdBitrates = [2_000_000, 5_000_000, 8_000_000];
+
+    // 500k and 1M are here because a CAN FD bus does not have to speed up for its data phase:
+    // plenty run the data rate at the arbitration rate and take only the 64-byte payload.
+    // 8M is a ValueCAN figure — the SLCAN board's transceiver stops at 5M and says so.
+    private static readonly int[] FdBitrates =
+        [500_000, 1_000_000, 2_000_000, 5_000_000, 8_000_000];
 
     private readonly MessageHub _hub = new();
     private readonly DbcDecoder _dbc = new();
@@ -297,18 +302,39 @@ public partial class MainWindow : Window
         });
 
     private void BitrateMenu_Opened(object sender, RoutedEventArgs e) =>
-        FillRadioMenu(MenuBitrate, Bitrates, b => $"{b:N0} bit/s", b => b == _bitrate, b =>
-        {
-            _bitrate = b;
-            UpdateSummary();
-        });
+        FillBitrateMenu(MenuBitrate, Bitrates, _bitrate, "Bitrate",
+                        "Arbitration bitrate in bit/s:", b => { _bitrate = b; UpdateSummary(); });
 
     private void FdBitrateMenu_Opened(object sender, RoutedEventArgs e) =>
-        FillRadioMenu(MenuFdBitrate, FdBitrates, b => $"{b:N0} bit/s", b => b == _fdBitrate, b =>
+        FillBitrateMenu(MenuFdBitrate, FdBitrates, _fdBitrate, "CAN FD data bitrate",
+                        "Bitrate of the data phase, in bit/s:", b => { _fdBitrate = b; UpdateSummary(); });
+
+    /// <summary>
+    /// The usual speeds, whatever is set now, and a Custom… entry for the rest.
+    ///
+    /// A fixed list was the only way in, so a bus running at a speed nobody thought to put in it
+    /// could not be selected here at all — and the speeds that belong in the list depend on the
+    /// device, which is not known until it is opened. Anything entered is offered to the device
+    /// at connect, which is the only place that can actually judge it.
+    /// </summary>
+    private void FillBitrateMenu(MenuItem parent, IReadOnlyList<int> presets, int current,
+                                 string title, string prompt, Action<int> pick)
+    {
+        List<int> rates = presets.Contains(current) ? [.. presets] : [.. presets, current];
+        rates.Sort();
+        FillRadioMenu(parent, rates, b => $"{b:N0} bit/s", b => b == current, pick);
+        parent.Items.Add(new Separator());
+
+        var custom = new MenuItem { Header = "_Custom…" };
+        custom.Click += (_, _) =>
         {
-            _fdBitrate = b;
-            UpdateSummary();
-        });
+            int? entered = InputDialog.AskInt(this, title, prompt, current, 1_000, 8_000_000,
+                "Not every device can produce every speed. Connect says so if this one cannot, " +
+                "and names what it can do instead.");
+            if (entered is not null) pick(entered.Value);
+        };
+        parent.Items.Add(custom);
+    }
 
     private void FdEnabled_Click(object sender, RoutedEventArgs e) => UpdateSummary();
 
