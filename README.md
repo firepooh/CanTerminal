@@ -1,11 +1,13 @@
 # CanTerminal — ValueCAN 모니터 + 원격 API + MCP
 
-Intrepid ValueCAN용 CAN 모니터 (cangaroo 스타일, C#/WPF).
+Intrepid ValueCAN용 CAN 모니터 (cangaroo 스타일, C#/WPF). SLCAN 직렬 인터페이스
+(WeAct USB2CANFDV2 등 CANable 2 계열)도 지원합니다.
 모니터가 디바이스를 단독 소유하고, 파이썬 테스트와 Claude(MCP)는 모니터를 경유해 송수신하므로
 **테스트 실행 중에도 모든 트래픽이 모니터 화면에 보입니다.**
 
 ```
-ValueCAN ── icsneo40.dll ── CanTerminal.exe (WPF 모니터)
+ValueCAN ──── icsneo40.dll ─┐
+USB2CAN SLCAN ── COM 포트 ──┴─ CanTerminal.exe (WPF 모니터)
                               ├─ Trace / Fixed 뷰, DBC 디코딩, TX 패널, CSV 저장
                               ├─ TCP JSON API (127.0.0.1:29536)  ← python 테스트
                               └─ CanTerminal.Mcp (stdio MCP 서버) ← Claude Code 등
@@ -40,6 +42,13 @@ dotnet build CanTerminal.slnx
   그 사실을 알립니다. 모니터가 하드웨어 없을 때 조용히 지어낸 트래픽을 흘리면, 화면의 데이터가
   버스에서 온 것인지 아닌지를 구분할 수 없게 됩니다 (한 번 선택한 뒤에는 `F5`를 눌러도 유지됩니다)
 - ValueCAN: Intrepid 드라이버(icsneo40.dll) 설치 필요. 채널 이름은 `CAN1`(HSCAN), `CAN2`(HSCAN2), `CAN3`, `CAN4`, `MSCAN`(ValueCAN3의 2번째 채널), `SWCAN`
+- **USB2CAN SLCAN** (WeAct USB2CANFDV2 등): 드라이버 불필요 — USB CDC 가상 COM 포트로 동작.
+  스캔이 ST CDC(VID 0483/PID 5740) 포트를 후보로 올리고, 연결 시 `V` 질의 응답으로 SLCAN 장치임을
+  확인합니다. **단일 채널**이라 `Bus ▸ Channels…`에 여러 개가 있으면 첫 항목만 열고
+  그 사실을 상태줄에 알립니다(설정은 바꾸지 않음 — 다음 ValueCAN 세션이 반쪽이 되지 않도록). 클래식(S0~S8 프리셋)과
+  CAN FD(데이터 1~5M) 모두 지원. 하드웨어 타임스탬프가 없어 프레임 시각은 호스트 수신 시각이며,
+  TX 에코는 펌웨어가 "버스에 실제로 나갔다"고 확인(CR ACK)한 시점에 표시됩니다 — 상대가 없는 버스에서는
+  전송 실패가 상태줄에 보고되고 아무것도 보낸 것으로 표시되지 않습니다.
 
 ## 화면 구성 — 메뉴 바 + 한 줄 툴바
 

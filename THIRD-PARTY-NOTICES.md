@@ -30,6 +30,14 @@ DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
 
+## System.IO.Ports
+
+Serial-port transport for the SLCAN adapter (WeAct USB2CANFDV2 and similar).
+
+- Author: Microsoft (.NET libraries)
+- Project: https://github.com/dotnet/runtime
+- License: MIT
+
 ## .NET runtime
 
 The standalone build embeds the .NET runtime, licensed by Microsoft under the MIT License.

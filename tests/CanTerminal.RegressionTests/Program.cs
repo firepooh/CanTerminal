@@ -4,6 +4,7 @@ using System.Text;
 using CanTerminal.App;
 using CanTerminal.Core;
 using CanTerminal.Core.Logs;
+using CanTerminal.Core.Slcan;
 using CanTerminal.Core.Xcp;
 // WPF's implicit usings bring in System.Windows.Shapes, whose Path is not this one.
 using File = System.IO.File;
@@ -85,6 +86,13 @@ internal static class Program
 
         Section("Log size estimate");
         EstimatesAreFormatSpecific();
+
+        Section("SLCAN");
+        SlcanTxLinesMatchTheWireFormat();
+        SlcanFdPaddingLandsOnALegalLength();
+        SlcanRxLinesRoundTrip();
+        SlcanRejectsWhatItCannotCarry();
+        SlcanBitratesMapToTheFirmwareCodes();
 
         Console.WriteLine();
         Console.WriteLine(_failures == 0 ? "ALL PASS" : $"{_failures} FAILURE(S)");
@@ -947,6 +955,98 @@ internal static class Program
               mdf.EstimateFrames(1_000_000) > asc.EstimateFrames(1_000_000));
         Check("MDF4 overestimates the uncompressed case",
               mdf.EstimateFrames(13_063_392) >= 483_621);
+    }
+
+    // ---------------- SLCAN ----------------
+
+    /// <summary>The exact ASCII the WeAct firmware documents, one case per frame letter.</summary>
+    private static void SlcanTxLinesMatchTheWireFormat()
+    {
+        Check("classic standard",
+              SlcanProtocol.BuildTxLine(0x123, [0xDE, 0xAD, 0xBE, 0xEF], extended: false, fd: false, brs: false)
+              == "t1234DEADBEEF");
+        Check("classic extended",
+              SlcanProtocol.BuildTxLine(0x18DAF110, [0x01, 0x02], extended: true, fd: false, brs: false)
+              == "T18DAF1102" + "0102");
+        Check("FD without BRS uses d and the FD DLC code",
+              SlcanProtocol.BuildTxLine(0x123, new byte[12], extended: false, fd: true, brs: false)
+              == "d1239" + new string('0', 24));
+        Check("FD with BRS on an extended id uses B",
+              SlcanProtocol.BuildTxLine(0x123, new byte[64], extended: true, fd: true, brs: true)
+              == "B00000123F" + new string('0', 128));
+    }
+
+    /// <summary>13 bytes cannot go on a CAN FD bus; the next legal length is 16, zero-filled.</summary>
+    private static void SlcanFdPaddingLandsOnALegalLength()
+    {
+        byte[] original = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13];
+        var padded = SlcanProtocol.PadToFd(original);
+        Check("13 bytes pad to 16", padded.Length == 16);
+        Check("payload survives, tail is zero",
+              padded.Take(13).SequenceEqual(original) && padded.Skip(13).All(b => b == 0));
+        Check("a legal length is copied, not aliased",
+              !ReferenceEquals(SlcanProtocol.PadToFd(new byte[8]), null) &&
+              SlcanProtocol.PadToFd(original) is not null && !ReferenceEquals(SlcanProtocol.PadToFd(padded), padded));
+    }
+
+    /// <summary>Every TX line the builder emits must come back identical through the RX parser.</summary>
+    private static void SlcanRxLinesRoundTrip()
+    {
+        foreach (var (id, data, ext, fd, brs) in new (uint, byte[], bool, bool, bool)[]
+        {
+            (0x123, [0xDE, 0xAD], false, false, false),
+            (0x7FF, [], false, false, false),
+            (0x1FFFFFFF, [1, 2, 3, 4, 5, 6, 7, 8], true, false, false),
+            (0x100, new byte[24], false, true, false),
+            (0x18FF50E5, new byte[48], true, true, true),
+        })
+        {
+            string line = SlcanProtocol.BuildTxLine(id, data, ext, fd, brs);
+            bool ok = SlcanProtocol.TryParseRxLine(line, out var rx)
+                      && rx.Id == id && rx.Extended == ext && rx.Fd == fd && rx.Brs == brs
+                      && !rx.Remote && rx.Data.SequenceEqual(data);
+            Check($"round-trip {line[..Math.Min(12, line.Length)]}…", ok);
+        }
+
+        Check("lowercase hex is accepted on the way in",
+              SlcanProtocol.TryParseRxLine("t1232dead", out var lower) && lower.Data is [0xDE, 0xAD]);
+        Check("remote frame carries its DLC as zeroes",
+              SlcanProtocol.TryParseRxLine("r1238", out var rtr) && rtr.Remote && rtr.Data.Length == 8);
+        Check("extended remote frame",
+              SlcanProtocol.TryParseRxLine("R000001234", out var xr) && xr.Remote && xr.Extended
+              && xr.Id == 0x123 && xr.Data.Length == 4);
+    }
+
+    /// <summary>Malformed lines are refused, never guessed at.</summary>
+    private static void SlcanRejectsWhatItCannotCarry()
+    {
+        foreach (var bad in new[]
+        {
+            "t123", "x1230", "t123G00", "t1239" + new string('0', 18),   // classic DLC 9
+            "t1232AABBCC",                                               // data longer than DLC
+            "d1239" + new string('0', 22),                               // FD data shorter than DLC
+            "r12380",                                                    // RTR with data bytes
+            "",
+        })
+            Check($"rejects '{(bad.Length > 12 ? bad[..12] + "…" : bad)}'",
+                  !SlcanProtocol.TryParseRxLine(bad, out _));
+
+        Check("11-bit id over 0x7FF is refused",
+              Throws(() => SlcanProtocol.BuildTxLine(0x800, [], extended: false, fd: false, brs: false)));
+        Check("9 bytes on classic CAN is refused",
+              Throws(() => SlcanProtocol.BuildTxLine(0x123, new byte[9], extended: false, fd: false, brs: false)));
+    }
+
+    /// <summary>The S/Y preset tables — and a speed the firmware lacks names the ones it has.</summary>
+    private static void SlcanBitratesMapToTheFirmwareCodes()
+    {
+        Check("500k -> S6", SlcanProtocol.NominalBitrateCode(500_000) == '6');
+        Check("125k -> S4", SlcanProtocol.NominalBitrateCode(125_000) == '4');
+        Check("1M -> S8", SlcanProtocol.NominalBitrateCode(1_000_000) == '8');
+        Check("2M data -> Y2", SlcanProtocol.DataBitrateCode(2_000_000) == '2');
+        Check("5M data -> Y5", SlcanProtocol.DataBitrateCode(5_000_000) == '5');
+        Check("300k is refused by name", Throws(() => SlcanProtocol.NominalBitrateCode(300_000)));
+        Check("8M data is refused by name", Throws(() => SlcanProtocol.DataBitrateCode(8_000_000)));
     }
 
     // ---------------- helpers ----------------

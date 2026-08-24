@@ -2,6 +2,7 @@ using System.Windows;
 using System.Windows.Input;
 using CanTerminal.Core;
 using CanTerminal.Core.IcsNeo;
+using CanTerminal.Core.Slcan;
 
 namespace CanTerminal.App;
 
@@ -12,7 +13,11 @@ public partial class MainWindow
 {
     // ---------- devices / connection ----------
 
-    private sealed record DeviceItem(string Label, IcsDeviceInfo? Ics)
+    /// <summary>
+    /// One scan result. Exactly one of <paramref name="Ics"/> / <paramref name="SlcanPort"/> is
+    /// set for real hardware; both null is the virtual bus.
+    /// </summary>
+    private sealed record DeviceItem(string Label, IcsDeviceInfo? Ics, string? SlcanPort = null)
     {
         public override string ToString() => Label;
     }
@@ -43,6 +48,13 @@ public partial class MainWindow
         {
             InfoText.Text = $"Device scan failed: {ex.Message}";
         }
+
+        // Serial SLCAN interfaces (WeAct USB2CANFDV2 and other CANable-2 derivatives). The USB
+        // identity is generic ST CDC, so this is a candidate list — Connect verifies the device
+        // actually speaks SLCAN before configuring it.
+        foreach (var port in SlcanAdapter.FindPorts())
+            items.Add(new DeviceItem($"USB2CAN SLCAN ({port})", null, port));
+
         _devices = items;
 
         // An explicit pick survives a rescan — including the virtual bus, so choosing it once
@@ -52,7 +64,8 @@ public partial class MainWindow
         // bus is never selected on the program's own initiative: this is a monitor, and a
         // monitor that quietly hands you invented traffic when the hardware is missing is
         // answering a question nobody asked. Connect says so instead.
-        _device = PreferredDevice(items, _device?.Label, d => d.Label, d => d.Ics is not null);
+        _device = PreferredDevice(items, _device?.Label, d => d.Label,
+                                  d => d.Ics is not null || d.SlcanPort is not null);
         UpdateConnStatus();
     }
 
@@ -78,8 +91,9 @@ public partial class MainWindow
             // RefreshDevices leaves unselected. Saying nothing here would be the old behaviour
             // wearing a different mask.
             MessageBox.Show(this,
-                "No Intrepid device found.\n\n" +
-                "Plug in a ValueCAN / neoVI and press F5 (Bus ▸ Refresh devices).\n\n" +
+                "No CAN interface found.\n\n" +
+                "Plug in a ValueCAN / neoVI, or a USB2CAN SLCAN device, and press F5 " +
+                "(Bus ▸ Refresh devices).\n\n" +
                 "To work without hardware, pick Bus ▸ Device ▸ Virtual bus (no hardware) — " +
                 "it generates traffic of its own, so what you see will not have come from a bus.",
                 "Connect", MessageBoxButton.OK, MessageBoxImage.Information);
@@ -91,7 +105,22 @@ public partial class MainWindow
             var channels = ParseChannels(_channelsText, _bitrate, fd, _fdBitrate);
             if (channels.Count == 0) channels.Add(new CanChannelConfig("CAN1", _bitrate, fd, _fdBitrate));
 
-            ICanAdapter adapter = _device.Ics is null ? new VirtualAdapter() : new IcsNeoAdapter(_device.Ics);
+            ICanAdapter adapter = _device.Ics is { } ics ? new IcsNeoAdapter(ics)
+                : _device.SlcanPort is { } slcanPort ? new SlcanAdapter(slcanPort)
+                : new VirtualAdapter();
+
+            // A single-channel device connects with the first entry of a multi-channel setting
+            // rather than failing on it. The alternative — telling the user to narrow
+            // Bus ▸ Channels… — persists that narrowing globally, and the next two-port
+            // ValueCAN session then opens one port and silently loses the other bus.
+            string? channelNote = null;
+            if (adapter is SlcanAdapter && channels.Count > 1)
+            {
+                channelNote = $"{_device.Label} has a single CAN channel — opened " +
+                              $"{channels[0].Name.ToUpperInvariant()} only. The Channels setting is unchanged.";
+                channels = [channels[0]];
+            }
+
             adapter.FrameReceived += _hub.Publish;
             adapter.ErrorOccurred += msg => Dispatcher.BeginInvoke(() => InfoText.Text = msg);
             adapter.Open(channels);
@@ -104,6 +133,7 @@ public partial class MainWindow
                 string.Join(", ", channels.Select(c => $"{c.Name.ToUpperInvariant()}@{c.Bitrate}")) +
                 $"]{(fd ? " FD" : "")}";
             OnChannelsOpened(adapter.Channels);
+            if (channelNote is not null) InfoText.Text = channelNote;
         }
         catch (Exception ex)
         {
@@ -164,6 +194,14 @@ public partial class MainWindow
         StopPeriodic();
         try { _adapter?.Dispose(); } catch { }
         _adapter = null;
+        // The time anchor belongs to a capture, not to the program. The next device may run on
+        // a different clock entirely: ValueCAN timestamps come from the device's continuously
+        // running hardware clock, which hid this — the SLCAN adapter's stopwatch restarts at
+        // zero on every open, and against a stale anchor its whole session rendered thousands
+        // of seconds in the past. Queued frames of the old era go too, so the first frame the
+        // new anchor is measured from is actually the new capture's.
+        _haveZero = false;
+        while (_pending.TryDequeue(out _)) { }
         _txChannel = null;
         TxChannelText.Text = "—";       // no channel is open, so naming one would be a lie
         ConnectButton.Content = "Connect";
@@ -262,7 +300,8 @@ public partial class MainWindow
         string? entered = InputDialog.Ask(this, "Channels", "Channels to open:", _channelsText,
             "Comma separated: CAN1,CAN2,CAN3,CAN4,MSCAN,SWCAN\n" +
             "Per-channel speed: NAME@bitrate[:fdbitrate], e.g. CAN1@500000,CAN2@125000\n" +
-            "Without @ the Bus ▸ Bitrate value is used.");
+            "Without @ the Bus ▸ Bitrate value is used.\n" +
+            "A USB2CAN SLCAN device has a single channel — only the first entry is used.");
         if (entered is null) return;
         try
         {
