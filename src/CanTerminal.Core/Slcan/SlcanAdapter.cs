@@ -130,9 +130,10 @@ public sealed class SlcanAdapter : ICanAdapter
                 $"(e.g. CAN1), not '{string.Join(",", channels.Select(c => c.Name))}'.");
 
         var cfg = channels[0];
-        // Resolved before the port is touched, so an unsupported speed fails without side effects.
-        char nominal = SlcanProtocol.NominalBitrateCode(cfg.Bitrate);
-        char? data = cfg.Fd ? SlcanProtocol.DataBitrateCode(cfg.FdBitrate) : null;
+        // Resolved before the port is touched, so a rate this device cannot time fails without
+        // side effects.
+        string nominal = SlcanProtocol.NominalCommand(cfg.Bitrate);
+        string? data = cfg.Fd ? SlcanProtocol.DataCommand(cfg.FdBitrate) : null;
 
         // The port is USB CDC: the baud rate is ignored by the firmware and DTR is not required,
         // but some CDC stacks hold data back until DTR is raised, so raise it.
@@ -166,8 +167,8 @@ public sealed class SlcanAdapter : ICanAdapter
                     $"{PortName} did not answer the SLCAN version query — not an SLCAN device, " +
                     "or another program is holding it.");
 
-            Command(port, $"S{nominal}");
-            if (data is { } y) Command(port, $"Y{y}");
+            Command(port, nominal);
+            if (data is { } y) Command(port, y);
             Command(port, "O");
 
             _channel = cfg.Name.ToUpperInvariant();

@@ -93,6 +93,8 @@ internal static class Program
         SlcanRxLinesRoundTrip();
         SlcanRejectsWhatItCannotCarry();
         SlcanBitratesMapToTheFirmwareCodes();
+        SlcanTimesRatesThatHaveNoPreset();
+        SlcanRefusesRatesItCannotTime();
 
         Console.WriteLine();
         Console.WriteLine(_failures == 0 ? "ALL PASS" : $"{_failures} FAILURE(S)");
@@ -1037,16 +1039,60 @@ internal static class Program
               Throws(() => SlcanProtocol.BuildTxLine(0x123, new byte[9], extended: false, fd: false, brs: false)));
     }
 
-    /// <summary>The S/Y preset tables — and a speed the firmware lacks names the ones it has.</summary>
+    /// <summary>Presets where the firmware has one.</summary>
     private static void SlcanBitratesMapToTheFirmwareCodes()
     {
-        Check("500k -> S6", SlcanProtocol.NominalBitrateCode(500_000) == '6');
-        Check("125k -> S4", SlcanProtocol.NominalBitrateCode(125_000) == '4');
-        Check("1M -> S8", SlcanProtocol.NominalBitrateCode(1_000_000) == '8');
-        Check("2M data -> Y2", SlcanProtocol.DataBitrateCode(2_000_000) == '2');
-        Check("5M data -> Y5", SlcanProtocol.DataBitrateCode(5_000_000) == '5');
-        Check("300k is refused by name", Throws(() => SlcanProtocol.NominalBitrateCode(300_000)));
-        Check("8M data is refused by name", Throws(() => SlcanProtocol.DataBitrateCode(8_000_000)));
+        Check("500k -> S6", SlcanProtocol.NominalCommand(500_000) == "S6");
+        Check("125k -> S4", SlcanProtocol.NominalCommand(125_000) == "S4");
+        Check("1M -> S8", SlcanProtocol.NominalCommand(1_000_000) == "S8");
+        Check("2M data -> Y2", SlcanProtocol.DataCommand(2_000_000) == "Y2");
+        Check("5M data -> Y5", SlcanProtocol.DataCommand(5_000_000) == "Y5");
+    }
+
+    /// <summary>
+    /// Rates with no preset are timed rather than refused. The device can produce far more than
+    /// the preset tables list — 500 kbit/s of CAN FD data among them — and the program used to
+    /// turn those away while blaming the hardware.
+    ///
+    /// The check decodes the command back into a rate rather than trusting the arithmetic that
+    /// built it, and requires the sample point to land where CAN wants it.
+    /// </summary>
+    private static void SlcanTimesRatesThatHaveNoPreset()
+    {
+        foreach (int bps in new[] { 500_000, 1_000_000, 250_000, 125_000, 1_500_000, 4_000_000 })
+        {
+            string command = SlcanProtocol.DataCommand(bps);
+            if (command.Length == 2) { Check($"FD data {bps:N0} uses a preset ({command})", true); continue; }
+            var (produced, samplePoint) = SlcanProtocol.Decode(command);
+            Check($"FD data {bps:N0} -> {command} = {produced:N0} @ {samplePoint:P0}",
+                  produced == bps && samplePoint is >= 0.6 and <= 0.9);
+        }
+
+        foreach (int bps in new[] { 300_000, 400_000, 600_000, 750_000 })
+        {
+            string command = SlcanProtocol.NominalCommand(bps);
+            var (produced, samplePoint) = SlcanProtocol.Decode(command);
+            Check($"arbitration {bps:N0} -> {command} = {produced:N0} @ {samplePoint:P0}",
+                  produced == bps && samplePoint is >= 0.6 and <= 0.9);
+        }
+
+        Check("500k FD data is a computed command, not a preset",
+              SlcanProtocol.DataCommand(500_000).Length == 7);
+    }
+
+    /// <summary>What genuinely cannot be done is refused — and the message no longer blames the device.</summary>
+    private static void SlcanRefusesRatesItCannotTime()
+    {
+        string tooFast = Message(() => SlcanProtocol.DataCommand(8_000_000));
+        Check("8M data is refused as above what the device runs", tooFast.Contains("highest"), tooFast);
+
+        string odd = Message(() => SlcanProtocol.NominalCommand(499_999));
+        Check("an untimeable rate says why and names neighbours",
+              odd.Contains("cannot be timed exactly") && odd.Contains("Closest"), odd);
+        Check("the refusal does not claim the device lacks the feature", !odd.Contains("does not support"), odd);
+
+        Check("2M arbitration is refused (classic CAN tops out at 1M)",
+              Throws(() => SlcanProtocol.NominalCommand(2_000_000)));
     }
 
     // ---------------- helpers ----------------
@@ -1072,6 +1118,13 @@ internal static class Program
     {
         try { action(); return false; }
         catch { return true; }
+    }
+
+    /// <summary>The message an action fails with, so a test can hold the wording to account.</summary>
+    private static string Message(Action action)
+    {
+        try { action(); return ""; }
+        catch (Exception ex) { return ex.Message; }
     }
 
     private static void Section(string name) => Console.WriteLine($"{name}:");

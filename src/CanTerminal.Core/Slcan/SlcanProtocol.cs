@@ -47,17 +47,126 @@ internal static class SlcanProtocol
         (1_000_000, '1'), (2_000_000, '2'), (3_000_000, '3'), (4_000_000, '4'), (5_000_000, '5'),
     ];
 
-    internal static char NominalBitrateCode(int bps) => Code(NominalRates, bps, "bitrate");
+    /// <summary>The CAN controller's clock. Every bitrate this device can produce divides it.</summary>
+    private const long ClockHz = 60_000_000;
 
-    internal static char DataBitrateCode(int bps) => Code(DataRates, bps, "FD data bitrate");
+    // Bit timing the firmware accepts, per phase: a clock divider, then the segments either side
+    // of the sample point. One bit takes (1 + seg1 + seg2) time quanta.
+    private const int MaxDivider = 255;
+    private const int NominalMinSeg1 = 2, NominalMaxSeg1 = 255, NominalMinSeg2 = 2, NominalMaxSeg2 = 128;
+    private const int DataMinSeg1 = 1, DataMaxSeg1 = 32, DataMinSeg2 = 1, DataMaxSeg2 = 16;
 
-    private static char Code((int Bps, char Code)[] table, int bps, string what)
+    /// <summary>Where in the bit the receiver samples. 80% is the usual choice for CAN.</summary>
+    private const double PreferredSamplePoint = 0.8;
+
+    /// <summary>Classic CAN tops out here, and so does this device's arbitration phase.</summary>
+    private const int MaxNominalBps = 1_000_000;
+
+    /// <summary>What the isolated transceiver on this board is rated for.</summary>
+    private const int MaxDataBps = 5_000_000;
+
+    /// <summary>
+    /// The command that sets the arbitration bitrate, e.g. "S6" or "S041706".
+    ///
+    /// A preset when the firmware has one — those carry the vendor's own sample point — and
+    /// otherwise timing computed for the requested rate. Only presets used to be offered, which
+    /// left the program refusing rates the device is perfectly capable of and, worse, saying the
+    /// device did not support them.
+    /// </summary>
+    internal static string NominalCommand(int bps) => Command(
+        'S', bps, MaxNominalBps, NominalRates, "bitrate",
+        NominalMinSeg1, NominalMaxSeg1, NominalMinSeg2, NominalMaxSeg2);
+
+    /// <summary>The command that sets the CAN FD data bitrate, e.g. "Y2" or "Y041706".</summary>
+    internal static string DataCommand(int bps) => Command(
+        'Y', bps, MaxDataBps, DataRates, "CAN FD data bitrate",
+        DataMinSeg1, DataMaxSeg1, DataMinSeg2, DataMaxSeg2);
+
+    private static string Command(char letter, int bps, int maxBps, (int Bps, char Code)[] presets, string what,
+                                  int minSeg1, int maxSeg1, int minSeg2, int maxSeg2)
     {
-        foreach (var (rate, code) in table)
-            if (rate == bps) return code;
+        if (bps <= 0) throw new ArgumentException($"A {what} of {bps:N0} bit/s makes no sense.");
+        if (bps > maxBps)
+            throw new ArgumentException(
+                $"{bps:N0} bit/s is above what this device runs: the highest {what} it supports is {maxBps:N0}.");
+
+        foreach (var (rate, code) in presets)
+            if (rate == bps) return $"{letter}{code}";
+
+        if (Timing(bps, minSeg1, maxSeg1, minSeg2, maxSeg2) is { } t)
+            return $"{letter}{t.Divider:X2}{t.Seg1:X2}{t.Seg2:X2}";
+
+        // Not a limit of the device so much as of arithmetic: the bit has to come out as a whole
+        // number of clock ticks. Naming the neighbours makes that actionable instead of a wall.
+        var near = Reachable(minSeg1, maxSeg1, minSeg2, maxSeg2, maxBps)
+            .OrderBy(r => Math.Abs(r - bps)).Take(3).OrderBy(r => r);
         throw new ArgumentException(
-            $"This device does not support a {what} of {bps:N0} bit/s. " +
-            $"Supported: {string.Join(", ", table.Select(t => $"{t.Bps:N0}"))}.");
+            $"A {what} of {bps:N0} bit/s cannot be timed exactly from this device's {ClockHz / 1_000_000} MHz clock. " +
+            $"Closest it can do: {string.Join(", ", near.Select(r => $"{r:N0}"))}.");
+    }
+
+    /// <summary>Bit timing for a rate, or null when the clock will not divide into it.</summary>
+    private static (int Divider, int Seg1, int Seg2)? Timing(int bps, int minSeg1, int maxSeg1, int minSeg2, int maxSeg2)
+    {
+        int minQuanta = 1 + minSeg1 + minSeg2, maxQuanta = 1 + maxSeg1 + maxSeg2;
+        (int Divider, int Seg1, int Seg2)? best = null;
+        double bestError = double.MaxValue;
+        int bestQuanta = 0;
+
+        for (int divider = 1; divider <= MaxDivider; divider++)
+        {
+            long ticksPerBit = (long)divider * bps;
+            if (ClockHz % ticksPerBit != 0) continue;              // the bit would not be a whole number of ticks
+            long quanta = ClockHz / ticksPerBit;
+            if (quanta < minQuanta || quanta > maxQuanta) continue;
+
+            // Put the sample point as near 80% as the segment limits allow.
+            int seg1 = Math.Clamp((int)Math.Round(quanta * PreferredSamplePoint) - 1, minSeg1, maxSeg1);
+            int seg2 = (int)quanta - 1 - seg1;
+            if (seg2 < minSeg2) { seg2 = minSeg2; seg1 = (int)quanta - 1 - seg2; }
+            if (seg2 > maxSeg2) { seg2 = maxSeg2; seg1 = (int)quanta - 1 - seg2; }
+            if (seg1 < minSeg1 || seg1 > maxSeg1 || seg2 < minSeg2 || seg2 > maxSeg2) continue;
+
+            double error = Math.Abs(((1.0 + seg1) / quanta) - PreferredSamplePoint);
+            // More quanta per bit is the better tie-break: the sample point lands more precisely.
+            if (error < bestError - 1e-9 || (Math.Abs(error - bestError) < 1e-9 && quanta > bestQuanta))
+            {
+                best = (divider, seg1, seg2);
+                bestError = error;
+                bestQuanta = (int)quanta;
+            }
+        }
+        return best;
+    }
+
+    /// <summary>Every rate this device can time exactly, for naming the neighbours of one it cannot.</summary>
+    private static IEnumerable<int> Reachable(int minSeg1, int maxSeg1, int minSeg2, int maxSeg2, int maxBps)
+    {
+        var rates = new HashSet<int>();
+        for (int divider = 1; divider <= MaxDivider; divider++)
+            for (long quanta = 1 + minSeg1 + minSeg2; quanta <= 1 + maxSeg1 + maxSeg2; quanta++)
+            {
+                long ticks = divider * quanta;
+                if (ClockHz % ticks != 0) continue;
+                long rate = ClockHz / ticks;
+                if (rate is >= 1000 && rate <= maxBps) rates.Add((int)rate);
+            }
+        return rates;
+    }
+
+    /// <summary>
+    /// The rate a computed command actually produces, and where it samples the bit. Only the
+    /// tests use this — it is how they check the timing rather than trusting the same arithmetic
+    /// that produced it.
+    /// </summary>
+    internal static (int Bps, double SamplePoint) Decode(string command)
+    {
+        if (command.Length != 7) throw new ArgumentException($"'{command}' is not a computed timing command.");
+        int divider = Convert.ToInt32(command.Substring(1, 2), 16);
+        int seg1 = Convert.ToInt32(command.Substring(3, 2), 16);
+        int seg2 = Convert.ToInt32(command.Substring(5, 2), 16);
+        long quanta = 1 + seg1 + seg2;
+        return ((int)(ClockHz / (divider * quanta)), (1.0 + seg1) / quanta);
     }
 
     /// <summary>
