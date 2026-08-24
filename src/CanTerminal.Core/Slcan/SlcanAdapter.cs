@@ -31,6 +31,17 @@ public sealed class SlcanAdapter : ICanAdapter
     /// </summary>
     private const int MaxPendingTx = 64;
 
+    /// <summary>
+    /// How long <see cref="Send"/> waits for the firmware's verdict on the frame it just wrote.
+    ///
+    /// Generous next to what it costs when the bus is healthy — a frame is on the wire and
+    /// acknowledged inside a couple of milliseconds — and bounded when it is not. The wait is
+    /// the whole point: without it the caller was told the frame was sent while the firmware
+    /// was still finding out, and a frame no other node acknowledged reported success to python
+    /// and MCP clients with the failure visible only on screen.
+    /// </summary>
+    private const int TxAckTimeoutMs = 250;
+
     private readonly object _txLock = new();
     private readonly Queue<PendingTx> _pendingTx = new();
 
@@ -43,7 +54,28 @@ public sealed class SlcanAdapter : ICanAdapter
     private string? _deviceVersion;     // the V-command reply, e.g. "WeAct Studio V1.0.0.3_bb264e71"
     private bool _reportedUnknownLine;
 
-    private sealed record PendingTx(uint Id, byte[] Data, bool Extended, bool Fd, bool Brs, string? Source);
+    /// <summary>
+    /// A frame written to the device and still waiting for its ack. Acks carry nothing to
+    /// identify themselves, so they are matched to sends in order; <see cref="Gate"/> is how the
+    /// RX thread hands the verdict back to whoever is blocked in <see cref="Send"/>.
+    /// </summary>
+    private sealed class PendingTx(uint id, byte[] data, bool extended, bool fd, bool brs, string? source)
+    {
+        public uint Id { get; } = id;
+        public byte[] Data { get; } = data;
+        public bool Extended { get; } = extended;
+        public bool Fd { get; } = fd;
+        public bool Brs { get; } = brs;
+        public string? Source { get; } = source;
+
+        public object Gate { get; } = new();
+        public bool Settled;
+        public bool Failed;
+
+        /// <summary>Set when the sender stopped waiting. The entry stays queued regardless —
+        /// dropping it would shift every later ack onto the wrong frame.</summary>
+        public bool Abandoned;
+    }
 
     public SlcanAdapter(string portName) => PortName = portName;
 
@@ -164,6 +196,7 @@ public sealed class SlcanAdapter : ICanAdapter
             rx.Join(2000);
             _rxThread = null;
         }
+        PendingTx[] stranded;
         lock (_txLock)
         {
             if (_port is { } port)
@@ -172,8 +205,12 @@ public sealed class SlcanAdapter : ICanAdapter
                 try { port.Dispose(); } catch { }
                 _port = null;
             }
+            stranded = [.. _pendingTx];
             _pendingTx.Clear();
         }
+        // Their acks can no longer arrive, so release the senders now rather than leaving each
+        // of them to sit out the full ack timeout on a port that is already gone.
+        foreach (var tx in stranded) Settle(tx, failed: true);
         Channels = [];
     }
 
@@ -191,6 +228,7 @@ public sealed class SlcanAdapter : ICanAdapter
 
         // Write and enqueue under one lock, the same lock the RX thread takes to consume an ack —
         // so an ack can never be processed between the write and its bookkeeping.
+        PendingTx pending;
         lock (_txLock)
         {
             if (_port is not { } port || !_open) throw new InvalidOperationException("Device not open.");
@@ -198,11 +236,42 @@ public sealed class SlcanAdapter : ICanAdapter
                 throw new InvalidOperationException(
                     $"{_pendingTx.Count} frames are still waiting for the bus — it is not accepting traffic.");
             port.Write(line + "\r");
-            _pendingTx.Enqueue(new PendingTx(arbId, payload, extended, fd, brs, source));
+            pending = new PendingTx(arbId, payload, extended, fd, brs, source);
+            _pendingTx.Enqueue(pending);
         }
-        // No local echo here: the firmware answers CR when the frame has been transmitted on the
-        // bus, and that ack is what publishes the TX frame (see OnTxDone). BELL means it failed —
-        // reported through ErrorOccurred, and nothing is shown as sent, because nothing was.
+
+        // Then wait for the firmware to say what became of it — outside the lock, which the RX
+        // thread needs in order to answer. The TX echo is published by that thread before it
+        // settles this, so a Send that returns means the frame is both on the bus and already
+        // visible to everything reading the capture.
+        lock (pending.Gate)
+        {
+            if (!pending.Settled) Monitor.Wait(pending.Gate, TxAckTimeoutMs);
+            if (!pending.Settled)
+            {
+                pending.Abandoned = true;
+                throw new TimeoutException(
+                    $"{PortName} did not confirm the transmission of 0x{arbId:X} within {TxAckTimeoutMs} ms. " +
+                    "It may still go out — a heavily loaded bus can hold a frame that long.");
+            }
+            if (pending.Failed)
+                throw new InvalidOperationException(
+                    $"0x{arbId:X} was not transmitted: the bus did not acknowledge it. " +
+                    "Nothing else is listening on it, or the bitrate does not match.");
+        }
+    }
+
+    /// <summary>Hands the firmware's verdict to a blocked <see cref="Send"/>. True if nobody was
+    /// waiting any more, in which case the caller reports it instead.</summary>
+    private static bool Settle(PendingTx pending, bool failed)
+    {
+        lock (pending.Gate)
+        {
+            pending.Settled = true;
+            pending.Failed = failed;
+            Monitor.Pulse(pending.Gate);
+            return pending.Abandoned;
+        }
     }
 
     private void RxLoop()
@@ -290,6 +359,8 @@ public sealed class SlcanAdapter : ICanAdapter
         // (or a repeat); there is nothing truthful to publish for it.
         if (done is not { } tx) return;
 
+        // Published before the sender is released, so a Send that returns has already put its
+        // frame in front of every reader of the capture.
         FrameReceived?.Invoke(new CanFrame
         {
             Timestamp = _clock.Elapsed.TotalSeconds,
@@ -302,6 +373,7 @@ public sealed class SlcanAdapter : ICanAdapter
             Data = tx.Data,
             Source = tx.Source,
         });
+        Settle(tx, failed: false);
     }
 
     private void OnTxFailed()
@@ -311,9 +383,18 @@ public sealed class SlcanAdapter : ICanAdapter
         {
             if (_pendingTx.Count > 0) failed = _pendingTx.Dequeue();
         }
-        ErrorOccurred?.Invoke(failed is { } tx
-            ? $"TX of 0x{tx.Id:X} failed on the bus (no ACK — nothing else on the bus, or wrong bitrate). The frame was not sent."
-            : $"{PortName} reported an error (BELL).");
+        if (failed is not { } tx)
+        {
+            ErrorOccurred?.Invoke($"{PortName} reported an error (BELL).");
+            return;
+        }
+        // Whoever sent it is waiting and gets this as an exception — saying it twice would put
+        // the same failure in the status line and a dialog. Only an abandoned send, whose sender
+        // has already given up, still needs reporting here.
+        if (Settle(tx, failed: true))
+            ErrorOccurred?.Invoke(
+                $"TX of 0x{tx.Id:X} failed on the bus (no ACK — nothing else on the bus, or wrong bitrate). " +
+                "The frame was not sent.");
     }
 
     /// <summary>

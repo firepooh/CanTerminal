@@ -69,6 +69,28 @@ public partial class MainWindow
         UpdateConnStatus();
     }
 
+    /// <summary>
+    /// Empties what the previous session left behind, so a capture only ever holds one device's
+    /// traffic on one clock. Returns what to say about it, or null when there was nothing to
+    /// discard — a capture thrown away silently is exactly the kind of thing this program is
+    /// supposed to be loud about.
+    /// </summary>
+    private string? ClearCaptureForNewSession()
+    {
+        long discarded = _hub.Snapshot().Length;
+        // Queued frames first, for the reason Clear documents: they belong to the old session and
+        // the next flush would otherwise put them into the new one, anchor and all.
+        while (_pending.TryDequeue(out _)) { }
+        PaneA.ClearAll();
+        PaneB.ClearAll();
+        _hub.Clear();
+        _displaySkipped = 0;
+        _haveZero = false;              // the first frame of this session is what time is measured from
+        return discarded == 0
+            ? null
+            : $"{discarded:N0} frames from the previous session were discarded — a new capture starts here.";
+    }
+
     private void UpdateConnStatus()
     {
         if (_adapter is null)
@@ -121,9 +143,19 @@ public partial class MainWindow
                 channels = [channels[0]];
             }
 
-            adapter.FrameReceived += _hub.Publish;
             adapter.ErrorOccurred += msg => Dispatcher.BeginInvoke(() => InfoText.Text = msg);
             adapter.Open(channels);
+
+            // Only now, with the device actually open, is the previous capture discarded — and
+            // before this adapter's frames are subscribed, so the new session loses nothing and
+            // an open that threw leaves the old capture intact.
+            //
+            // It has to go. Every adapter but the ValueCAN starts its clock at zero on open, so
+            // keeping the old frames leaves the buffer running backwards in time, and recent()
+            // would answer a question about this device with the previous one's traffic — the
+            // virtual bus's invented traffic, in the worst case.
+            string? clearedNote = ClearCaptureForNewSession();
+            adapter.FrameReceived += _hub.Publish;
             _adapter = adapter;
 
             _txChannel = adapter.Channels.FirstOrDefault();
@@ -133,7 +165,8 @@ public partial class MainWindow
                 string.Join(", ", channels.Select(c => $"{c.Name.ToUpperInvariant()}@{c.Bitrate}")) +
                 $"]{(fd ? " FD" : "")}";
             OnChannelsOpened(adapter.Channels);
-            if (channelNote is not null) InfoText.Text = channelNote;
+            // Both notes matter and there is one line to say them in.
+            InfoText.Text = string.Join("   ", new[] { channelNote, clearedNote }.Where(n => n is not null));
         }
         catch (Exception ex)
         {
