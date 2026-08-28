@@ -21,12 +21,15 @@ USB2CAN SLCAN ── COM 포트 ──┴─ CanTerminal.exe (WPF 모니터)
 
 | | |
 |---|---|
-| `CanTerminal-win-x64.zip` | 실행 PC에 **.NET 10 Desktop Runtime** 필요 (작음) |
-| `CanTerminal-win-x64-standalone.zip` | 런타임 포함, 설치 없이 실행 (큼) |
+| `CanTerminal-win-x64.zip` | 작음. 실행 PC에 **.NET 10 Desktop Runtime + ASP.NET Core Runtime** 둘 다 필요 |
+| `CanTerminal-win-x64-standalone.zip` | 런타임 포함, 설치 없이 실행 (약 75 MB) |
 
-둘 다 `CanTerminal.exe` + `python/` 클라이언트가 들어 있습니다 (MCP는 앱이 직접 서빙하므로
-별도 실행 파일이 없습니다). 작은 쪽은 **.NET 10 Desktop Runtime과 ASP.NET Core Runtime이 둘 다**
-필요합니다 — MCP 엔드포인트가 후자를 씁니다.
+둘 다 `CanTerminal.exe` + `python/` 클라이언트가 들어 있습니다 — MCP는 앱이 직접 서빙하므로
+별도 실행 파일이 없습니다.
+
+> 작은 쪽이 런타임을 **두 개** 요구하는 것은 MCP 엔드포인트가 ASP.NET Core 위에서 돌기 때문입니다.
+> WPF 사용자가 흔히 깔아 두는 Desktop Runtime에는 없고, 없으면 관리 코드가 돌기 전에 죽어서
+> 오류 창도 못 띄웁니다. 런타임을 신경 쓰기 싫으면 standalone 쪽을 받으세요.
 **`icsneo40.dll`은 넣지 않습니다** — Intrepid 드라이버 설치본의 일부입니다. 실장비를 쓰려면
 드라이버가 필요하고, 로그 열람(ASC/MDF4)과 가상 버스는 없어도 동작합니다.
 
@@ -70,7 +73,7 @@ dotnet build CanTerminal.slnx
 | **View** | Layout ▸ (`Ctrl+1/2/3`, XCP split `Ctrl+4`) · Pane A ▸ / Pane B ▸ · Text size ▸ (`Ctrl+±`, `Ctrl+0`, Ctrl+휠) · Timestamps ▸ · Highlight changes · Go to time… (`Ctrl+G`) · Jump to newest (`End`) · History size… · Pause display (`F7`) · Clear all (`Ctrl+L`) |
 | **Transmit** | Send frame (`Ctrl+Enter`) · Start/Stop cyclic TX (`F6` / `Shift+F6`) · Cycle time… · TX channel ▸ · Extended ID / CAN FD frame / Bit rate switch |
 | **Profile** | None / XCP on CAN · Set IDs on channel… · Remove session on channel ▸ · Load IDs from A2L… · Show XCP IDs only |
-| **Tools** | API server · API server port… · Copy python snippet |
+| **Tools** | API server · API server port… · MCP server (for Claude) · MCP server port… · MCP 사용 안내… · Copy MCP registration command · Copy python snippet |
 | **Help** | Keyboard shortcuts (`Ctrl+/`) · README on GitHub · About |
 
 메뉴로 숨긴 설정의 현재 값은 툴바 오른쪽 **요약 줄**에 항상 떠 있습니다:
@@ -631,6 +634,37 @@ CanTerminal.exe가 떠 있고 MCP가 켜져 있으면 Claude Code에서 다음 �
 - `can_send` — 프레임 송신 (모니터 trace에도 표시)
 - `can_recent` — 최근 버스 트래픽 조회 (DBC 디코딩 포함)
 - `can_wait_for` — 특정 ID 수신 대기
+
+### 등록 위치(스코프)가 실제로 중요한 부분입니다
+
+Claude Code는 등록을 어디에 저장할지 세 가지로 나눕니다. 한 프로젝트 폴더에만 등록해 두면 다른
+폴더에서 AI를 띄웠을 때 도구가 조용히 없습니다 — 처음 쓸 때 가장 많이 걸리는 지점입니다.
+
+| | 뜻 |
+|---|---|
+| **user** (권장) | 이 PC의 모든 폴더에서 쓴다 |
+| local | 이 폴더에서만, 내 PC에만 |
+| project | 이 폴더에서만, `.mcp.json`을 git으로 팀과 공유 |
+
+장비는 PC에 꽂혀 있고 엔드포인트도 PC당 하나이므로 **user 스코프가 실상에 맞습니다.**
+`Tools ▸ MCP 사용 안내…`에 같은 내용이 현재 포트가 채워진 채로 정리돼 있습니다.
+
+### 읽기 전용 모드가 없습니다
+
+MCP가 켜져 있는 동안 AI는 **실제 버스로 프레임을 보낼 수 있습니다** — 화면에 보고 있는 그 버스입니다.
+보내지 않게 하려면 MCP를 끄십시오.
+
+### 파이썬과는 별개의 창구입니다
+
+| | 쓰는 쪽 | 주소 | 기본 |
+|---|---|---|---|
+| **API server** | 파이썬 스크립트 | `127.0.0.1:29536` | 켜짐 |
+| **MCP server** | Claude | `127.0.0.1:5400/mcp` | 켜짐 |
+
+기능은 같지만 말하는 방식이 다르고, 둘 다 켜 두어도 됩니다. 파이썬 쪽이 별도로 남아 있는 이유는
+`subscribe`(프레임이 뜰 때마다 모니터가 밀어 주는 기능) 때문입니다 — MCP는 물어보면 답하는 구조라
+밀어 줄 수 없고, [python/canterminal_can/bus.py](python/canterminal_can/bus.py)의 `python-can`
+연동이 그 밀어 주기 위에 만들어져 있습니다.
 
 ## 테스트
 
