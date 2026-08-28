@@ -28,9 +28,8 @@ public sealed record ApiStatus(bool Connected, string? Adapter, IReadOnlyList<st
 /// </summary>
 public sealed class TcpApiServer : IDisposable
 {
-    public delegate void SendHandler(string channel, uint arbId, byte[] data, bool ext, bool fd, bool brs, string source);
-
     private readonly MessageHub _hub;
+    private readonly CanApi _api;
     private TcpListener? _listener;
     private CancellationTokenSource? _cts;
     private readonly List<Client> _clients = [];
@@ -46,10 +45,14 @@ public sealed class TcpApiServer : IDisposable
         public string Name = "?";
     }
 
-    public TcpApiServer(MessageHub hub) => _hub = hub;
+    /// <summary>The line protocol over TCP; the operations themselves live in <see cref="CanApi"/>,
+    /// which the MCP endpoint serves from as well.</summary>
+    public TcpApiServer(MessageHub hub, CanApi api)
+    {
+        _hub = hub;
+        _api = api;
+    }
 
-    public SendHandler? OnSend { get; set; }
-    public Func<ApiStatus>? StatusProvider { get; set; }
     public event Action<string>? Info;
 
     public int Port { get; private set; }
@@ -197,7 +200,7 @@ public sealed class TcpApiServer : IDisposable
             case "hello":
             case "status":
             {
-                var st = StatusProvider?.Invoke() ?? new ApiStatus(false, null, [], null, "none");
+                var st = _api.Status();
                 return Reply(seq, new JsonObject
                 {
                     ["op"] = op == "hello" ? "hello" : "status",
@@ -218,14 +221,13 @@ public sealed class TcpApiServer : IDisposable
 
             case "send":
             {
-                var sender = OnSend ?? throw new InvalidOperationException("No device connected.");
                 string channel = req["channel"]?.GetValue<string>() ?? "CAN1";
                 uint id = ParseId(req["id"] ?? throw new InvalidOperationException("Missing 'id'."));
                 byte[] data = Convert.FromHexString(req["data"]?.GetValue<string>() ?? "");
                 bool ext = req["ext"]?.GetValue<bool>() ?? id > 0x7FF;
                 bool fd = req["fd"]?.GetValue<bool>() ?? false;
                 bool brs = req["brs"]?.GetValue<bool>() ?? false;
-                sender(channel, id, data, ext, fd, brs, $"tcp:{client.Name}");
+                _api.Send(channel, id, data, ext, fd, brs, $"tcp:{client.Name}");
                 return Reply(seq, new JsonObject { ["op"] = "ok" });
             }
 
@@ -245,12 +247,10 @@ public sealed class TcpApiServer : IDisposable
 
             case "recent":
             {
-                int count = Math.Clamp(req["count"]?.GetValue<int>() ?? 100, 1, 10_000);
-                string? channel = req["channel"]?.GetValue<string>()?.ToUpperInvariant();
+                int count = req["count"]?.GetValue<int>() ?? 100;
+                string? channel = req["channel"]?.GetValue<string>();
                 uint? id = req["id"] is JsonNode idNode ? ParseId(idNode) : null;
-                var frames = _hub.GetRecent(count, f =>
-                    (channel is null || f.Channel == channel) &&
-                    (id is null || f.ArbId == id.Value));
+                var frames = _api.Recent(count, channel, id);
                 var arr = new JsonArray();
                 foreach (var f in frames) arr.Add(FrameJson(f));
                 return Reply(seq, new JsonObject { ["op"] = "recent", ["frames"] = arr });
@@ -258,16 +258,10 @@ public sealed class TcpApiServer : IDisposable
 
             case "waitfor":
             {
-                // Nothing is ever published while a file is open, so this would block for the
-                // whole timeout and then report a timeout that means nothing.
-                if (StatusProvider?.Invoke().Mode == "log")
-                    return Err(seq, "A log file is open, so no frames will arrive. Use 'recent' to read it.");
                 uint id = ParseId(req["id"] ?? throw new InvalidOperationException("Missing 'id'."));
-                string? channel = req["channel"]?.GetValue<string>()?.ToUpperInvariant();
-                int timeoutMs = Math.Clamp(req["timeoutMs"]?.GetValue<int>() ?? 5000, 1, 300_000);
-                var frame = await _hub.WaitForAsync(
-                    f => f.ArbId == id && (channel is null || f.Channel == channel) && f.Direction == FrameDirection.Rx,
-                    TimeSpan.FromMilliseconds(timeoutMs)).ConfigureAwait(false);
+                string? channel = req["channel"]?.GetValue<string>();
+                int timeoutMs = req["timeoutMs"]?.GetValue<int>() ?? 5000;
+                var frame = await _api.WaitForAsync(id, channel, timeoutMs).ConfigureAwait(false);
                 return frame is null
                     ? Reply(seq, new JsonObject { ["op"] = "timeout" })
                     : Reply(seq, new JsonObject { ["op"] = "frame", ["frame"] = FrameJson(frame) });

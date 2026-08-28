@@ -40,7 +40,11 @@ public partial class MainWindow : Window
     private readonly MessageHub _hub = new();
     private readonly DbcDecoder _dbc = new();
     private readonly FrameAnnotator _annotator;
+
+    /// <summary>The operations both remote front ends offer; the servers below are transports.</summary>
+    private readonly CanApi _api;
     private readonly TcpApiServer _server;
+    private Core.Mcp.McpHttpServer? _mcp;
     private readonly AppSettings _settings = AppSettings.Load();
     private ICanAdapter? _adapter;
 
@@ -60,6 +64,7 @@ public partial class MainWindow : Window
     private int _historyCapacity = TraceBuffer.DefaultCapacity;
     private int _cycleMs = 100;
     private int _apiPort = 29536;
+    private int _mcpPort = 29537;
     private int _layout;                // 0 single, 1 split ↔, 2 split ↕
     private string? _txChannel;
     private string? _xcpChannel;        // channel the XCP dialog opens on
@@ -110,7 +115,7 @@ public partial class MainWindow : Window
         _annotator = new FrameAnnotator(_dbc);
         _hub.Annotator = _annotator.Annotate;
 
-        _server = new TcpApiServer(_hub)
+        _api = new CanApi(_hub)
         {
             OnSend = (channel, id, data, ext, fd, brs, source) =>
             {
@@ -125,6 +130,7 @@ public partial class MainWindow : Window
                 Mode: _log is null ? "live" : "log", LogPath: _log?.Path,
                 ChannelDbc: _channelDbc.Select(kv => $"{kv.Key}={Path.GetFileName(kv.Value.FilePath)}").ToArray()),
         };
+        _server = new TcpApiServer(_hub, _api);
         _server.Info += msg => Dispatcher.BeginInvoke(() => InfoText.Text = msg);
 
         _hub.FrameObserved += f => _pending.Enqueue(f);
@@ -156,6 +162,7 @@ public partial class MainWindow : Window
         ApplyLayout();
         RefreshDevices();
         ApplyServerSetting();
+        ApplyMcpSetting();
         UpdateConnStatus();
         UpdateMenuState();
         UpdateSummary();
@@ -189,8 +196,10 @@ public partial class MainWindow : Window
         PaneA.SetHistoryCapacity(_historyCapacity);
         PaneB.SetHistoryCapacity(_historyCapacity);
         _apiPort = s.ApiPort;
+        _mcpPort = s.McpPort;
         _cycleMs = s.CycleMs;
         MenuApiServer.IsChecked = s.ApiServer;
+        MenuMcpServer.IsChecked = s.McpServer;
 
         if (Enum.TryParse(s.Timestamps, out TimestampMode mode)) SetTimestampMode(mode);
         ApplyFontSize(s.FontSize);
@@ -233,6 +242,8 @@ public partial class MainWindow : Window
         _settings.HistoryCapacity = _historyCapacity;
         _settings.ApiServer = MenuApiServer.IsChecked;
         _settings.ApiPort = _apiPort;
+        _settings.McpServer = MenuMcpServer.IsChecked;
+        _settings.McpPort = _mcpPort;
         _settings.CycleMs = _cycleMs;
 
         // RestoreBounds rather than the live values when maximized or minimized, so the saved
@@ -528,9 +539,7 @@ public partial class MainWindow : Window
             RateText.Text = $"{log.FirstTimestamp:0.000} – {log.LastTimestamp:0.000} s   ({log.Duration:0.000} s)";
             TotalText.Text = $"{log.Frames.Count:N0} frames in file" +
                 (log.SkippedLines > 0 ? $"   ·   {log.SkippedLines:N0} lines not understood" : "");
-            ServerStatusText.Text = _server.IsRunning
-                ? $"API server: 127.0.0.1:{_server.Port} ({_server.ClientCount} clients)"
-                : "API server: off";
+            ServerStatusText.Text = ServerStatusLine();
             foreach (var pane in ActivePanes)
                 pane.UpdateStats($"{pane.TraceCount:N0} rows — log file");
             return;
@@ -576,15 +585,25 @@ public partial class MainWindow : Window
 
         TotalText.Text = $"{total:N0} frames" +
             (_displaySkipped > 0 ? $"  (display behind: {_displaySkipped:N0} not shown)" : "");
-        ServerStatusText.Text = _server.IsRunning
-            ? $"API server: 127.0.0.1:{_server.Port} ({_server.ClientCount} clients)"
-            : "API server: off";
+        ServerStatusText.Text = ServerStatusLine();
 
         // "paused" is worth saying on the pane itself: it is both why the rows stopped moving and
         // the reason scrolling back works at all.
         string state = PauseButton.IsChecked == true ? " — paused, scroll to browse" : "";
         foreach (var pane in ActivePanes)
             pane.UpdateStats($"{pane.TraceCount:N0} rows{state}");
+    }
+
+    /// <summary>Both remote front ends in one status-bar field, so neither is invisible.</summary>
+    private string ServerStatusLine()
+    {
+        string api = _server.IsRunning
+            ? $"API: 127.0.0.1:{_server.Port} ({_server.ClientCount} clients)"
+            : "API: off";
+        string mcp = _mcp?.State == Core.Mcp.McpHttpState.Running
+            ? $"MCP: 127.0.0.1:{_mcp.Port}"
+            : "MCP: off";
+        return $"{api}   ·   {mcp}";
     }
 
     // ---------- layout ----------
@@ -898,6 +917,7 @@ public partial class MainWindow : Window
         _statusTimer.Stop();
         StopPeriodic();
         SaveSettings();
+        _mcp?.Stop();
         _server.Dispose();
         try { _adapter?.Dispose(); } catch { }
     }

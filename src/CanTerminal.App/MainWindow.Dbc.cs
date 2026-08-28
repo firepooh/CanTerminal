@@ -256,6 +256,78 @@ public partial class MainWindow
         UpdateStatusBar();
     }
 
+    // ---------- MCP endpoint ----------
+
+    private void McpServer_Changed(object sender, RoutedEventArgs e) => ApplyMcpSetting();
+
+    /// <summary>
+    /// Opens or closes the MCP endpoint to match the menu.
+    ///
+    /// A port already taken is the ordinary case of a second copy of the program running, not a
+    /// fault: that copy simply has no endpoint, and says so rather than fighting for the port —
+    /// the registered URL has to keep meaning one program.
+    /// </summary>
+    private void ApplyMcpSetting()
+    {
+        if (MenuMcpServer is null) return;      // fires during InitializeComponent
+
+        if (!MenuMcpServer.IsChecked)
+        {
+            _mcp?.Stop();
+            _mcp = null;
+            UpdateStatusBar();
+            return;
+        }
+
+        _mcp ??= new Core.Mcp.McpHttpServer(_api, _mcpPort);
+        if (_mcp.Start())
+        {
+            InfoText.Text = $"MCP endpoint on {_mcp.Endpoint} — register it with:  {_mcp.RegistrationCommand}";
+        }
+        else
+        {
+            InfoText.Text = _mcp.State == Core.Mcp.McpHttpState.PortInUse
+                ? $"MCP endpoint not started: port {_mcpPort} is already in use — another CanTerminal is probably serving it."
+                : $"MCP endpoint failed to start: {_mcp.FailureDetail}";
+            _mcp = null;
+            MenuMcpServer.IsChecked = false;
+        }
+        UpdateStatusBar();
+    }
+
+    private void McpPort_Click(object sender, RoutedEventArgs e)
+    {
+        int? port = InputDialog.AskInt(this, "MCP server port", "HTTP port for the MCP endpoint:",
+                                       _mcpPort, 1, 65535,
+                                       "The endpoint always binds 127.0.0.1. Changing it means re-registering " +
+                                       "the URL with Claude.");
+        if (port is null || port.Value == _mcpPort) return;
+        _mcpPort = port.Value;
+        if (_mcp is not null)
+        {
+            _mcp.Stop();
+            _mcp = null;
+            ApplyMcpSetting();                 // rebuilt on the new port
+        }
+        UpdateStatusBar();
+    }
+
+    private void CopyMcpCommand_Click(object sender, RoutedEventArgs e)
+    {
+        // Built from the configured port whether or not the endpoint is up, so the command can be
+        // copied first and the switch thrown after.
+        string command = $"claude mcp add --transport http canterminal http://127.0.0.1:{_mcpPort}/mcp";
+        try
+        {
+            Clipboard.SetText(command);
+            InfoText.Text = $"Copied:  {command}";
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, ex.Message, "Copy registration command", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
+
     private void CopySnippet_Click(object sender, RoutedEventArgs e)
     {
         string channel = _txChannel ?? _adapter?.Channels.FirstOrDefault() ?? "CAN1";

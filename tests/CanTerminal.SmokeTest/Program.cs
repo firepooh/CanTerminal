@@ -23,11 +23,12 @@ using var adapter = new VirtualAdapter(generateTraffic: true, echoResponder: tru
 adapter.FrameReceived += hub.Publish;
 adapter.Open([new CanChannelConfig("CAN1"), new CanChannelConfig("CAN2")]);
 
-using var server = new TcpApiServer(hub)
+var api = new CanApi(hub)
 {
     OnSend = (channel, id, data, ext, fd, brs, source) => adapter.Send(channel, id, data, ext, fd, brs, source),
     StatusProvider = () => new ApiStatus(adapter.IsOpen, adapter.Name, adapter.Channels, dbc.FilePath, annotator.ProfileName),
 };
+using var server = new TcpApiServer(hub, api);
 server.Info += msg => Console.Error.WriteLine($"[server] {msg}");
 server.Start(port);
 

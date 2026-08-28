@@ -30,6 +30,11 @@ public sealed class AppSettings
     public int HistoryCapacity { get; set; } = TraceBuffer.DefaultCapacity;
     public bool ApiServer { get; set; } = true;
     public int ApiPort { get; set; } = 29536;
+
+    // The MCP endpoint the app serves itself. Off by default: it opens a listening socket, and
+    // someone who does not use Claude should not have one opened on their behalf.
+    public bool McpServer { get; set; }
+    public int McpPort { get; set; } = 29537;
     public int CycleMs { get; set; } = 100;
 
     // Window placement. Zero (never saved) leaves the XAML defaults alone.
@@ -68,6 +73,7 @@ public sealed class AppSettings
         FontSize = Math.Clamp(FontSize, 8, 28);
         HistoryCapacity = Math.Clamp(HistoryCapacity, TraceBuffer.MinCapacity, 5_000_000);
         ApiPort = Math.Clamp(ApiPort, 1, 65535);
+        McpPort = Math.Clamp(McpPort, 1, 65535);
         CycleMs = Math.Clamp(CycleMs, 1, 3_600_000);
         if (!Enum.TryParse<TimestampMode>(Timestamps, out _)) Timestamps = null;
         return this;

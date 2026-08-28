@@ -289,6 +289,11 @@
                           Checked="ApiServer_Changed" Unchecked="ApiServer_Changed"/>
                 <MenuItem Header="API server _port…" Click="ApiPort_Click"/>
                 <Separator/>
+                <MenuItem x:Name="MenuMcpServer" Header="_MCP server (for Claude)" IsCheckable="True"
+                          Checked="McpServer_Changed" Unchecked="McpServer_Changed"/>
+                <MenuItem Header="MCP server po_rt…" Click="McpPort_Click"/>
+                <MenuItem Header="Copy MCP _registration command" Click="CopyMcpCommand_Click"/>
+                <Separator/>
                 <MenuItem Header="_Copy python snippet" Click="CopySnippet_Click"/>
             </MenuItem>
 

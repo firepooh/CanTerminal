@@ -4,6 +4,7 @@ using System.Text;
 using CanTerminal.App;
 using CanTerminal.Core;
 using CanTerminal.Core.Logs;
+using CanTerminal.Core.Mcp;
 using CanTerminal.Core.Slcan;
 using CanTerminal.Core.Xcp;
 // WPF's implicit usings bring in System.Windows.Shapes, whose Path is not this one.
@@ -86,6 +87,11 @@ internal static class Program
 
         Section("Log size estimate");
         EstimatesAreFormatSpecific();
+
+        Section("MCP over HTTP");
+        McpEndpointAnswersOverHttp();
+        McpRefusesAForeignOrigin();
+        McpSecondBindReportsPortInUse();
 
         Section("SLCAN");
         SlcanTxLinesMatchTheWireFormat();
@@ -1093,6 +1099,119 @@ internal static class Program
 
         Check("2M arbitration is refused (classic CAN tops out at 1M)",
               Throws(() => SlcanProtocol.NominalCommand(2_000_000)));
+    }
+
+    // ---------------- MCP over HTTP ----------------
+
+    /// <summary>
+    /// The endpoint the app now serves itself, exercised over a real socket rather than by
+    /// calling the tool methods — the handshake, the transport and the tool wiring are what the
+    /// relay used to prove, and losing that coverage with the relay would be the actual risk.
+    /// </summary>
+    private static void McpEndpointAnswersOverHttp()
+    {
+        var hub = new MessageHub();
+        var api = new CanApi(hub)
+        {
+            StatusProvider = () => new ApiStatus(true, "test bus", ["CAN1"], null),
+        };
+        hub.Publish(new CanFrame { Channel = "CAN1", ArbId = 0x0CF00400, IsExtended = true, Timestamp = 1, Data = [1, 2] });
+
+        var server = new McpHttpServer(api, McpTestPort);
+        if (!server.Start()) { Check("MCP endpoint starts", false, server.FailureDetail); return; }
+        try
+        {
+            Check("MCP endpoint starts", true);
+            Check("endpoint url names the path", server.Endpoint?.EndsWith("/mcp") == true, server.Endpoint);
+
+            var init = McpRpc(1, "initialize", """{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"t","version":"0"}}""");
+            Check("initialize names this server", init.Contains("\"canterminal\""), init);
+
+            var tools = McpRpc(2, "tools/list", null);
+            foreach (string tool in new[] { "can_status", "can_send", "can_recent", "can_wait_for" })
+                Check($"{tool} is offered", tools.Contains($"\"{tool}\""));
+
+            var status = McpRpc(3, "tools/call", """{"name":"can_status","arguments":{}}""");
+            Check("can_status reaches the api", status.Contains("test bus"), status);
+
+            var recent = McpRpc(4, "tools/call", """{"name":"can_recent","arguments":{"count":5}}""");
+            Check("can_recent returns the published frame", recent.Contains("0CF00400"), recent);
+
+            var bad = McpRpc(5, "tools/call", """{"name":"can_send","arguments":{"channel":"CAN1","id":"NOTHEX"}}""");
+            Check("a bad id is an error, not a silent no-op", bad.Contains("isError\":true"), bad);
+        }
+        finally { server.Stop(); }
+    }
+
+    /// <summary>
+    /// Loopback is not private: a page the user visits can reach 127.0.0.1 from their browser.
+    /// Browsers always send Origin and MCP clients never do, so a foreign Origin must be refused.
+    /// </summary>
+    private static void McpRefusesAForeignOrigin()
+    {
+        var server = new McpHttpServer(new CanApi(new MessageHub()), McpTestPort);
+        if (!server.Start()) { Check("MCP endpoint starts (origin test)", false, server.FailureDetail); return; }
+        try
+        {
+            Check("a foreign Origin is refused", McpStatusCode("https://evil.example") == 403);
+            Check("a loopback Origin is allowed", McpStatusCode("http://localhost:1234") != 403);
+            Check("no Origin at all is allowed", McpStatusCode(null) != 403);
+        }
+        finally { server.Stop(); }
+    }
+
+    /// <summary>A second copy of the program must lose the port quietly, not crash or take it.</summary>
+    private static void McpSecondBindReportsPortInUse()
+    {
+        var first = new McpHttpServer(new CanApi(new MessageHub()), McpTestPort);
+        if (!first.Start()) { Check("first bind succeeds", false, first.FailureDetail); return; }
+        try
+        {
+            var second = new McpHttpServer(new CanApi(new MessageHub()), McpTestPort);
+            Check("second bind on the same port fails", !second.Start());
+            Check("and says the port is taken", second.State == McpHttpState.PortInUse, second.State.ToString());
+            Check("the first one is untouched", first.State == McpHttpState.Running);
+        }
+        finally { first.Stop(); }
+    }
+
+    /// <summary>Away from the app's own default so a running CanTerminal does not fail the tests.</summary>
+    private const int McpTestPort = 29631;
+
+    private static string McpRpc(int id, string method, string? paramsJson)
+    {
+        string body = paramsJson is null
+            ? $$"""{"jsonrpc":"2.0","id":{{id}},"method":"{{method}}"}"""
+            : $$"""{"jsonrpc":"2.0","id":{{id}},"method":"{{method}}","params":{{paramsJson}}}""";
+
+        using var http = new System.Net.Http.HttpClient { Timeout = TimeSpan.FromSeconds(20) };
+        using var content = new System.Net.Http.StringContent(body, Encoding.UTF8, "application/json");
+        using var request = new System.Net.Http.HttpRequestMessage(System.Net.Http.HttpMethod.Post,
+            $"http://127.0.0.1:{McpTestPort}/mcp") { Content = content };
+        request.Headers.Add("Accept", "application/json, text/event-stream");
+        if (_mcpSession is not null) request.Headers.Add("Mcp-Session-Id", _mcpSession);
+
+        var reply = http.Send(request);
+        if (reply.Headers.TryGetValues("Mcp-Session-Id", out var ids)) _mcpSession = ids.FirstOrDefault();
+        string text = reply.Content.ReadAsStringAsync().GetAwaiter().GetResult();
+        // The transport may answer with one JSON object or with the same object inside an SSE frame.
+        foreach (var line in text.Split('\n'))
+            if (line.StartsWith("data:")) return line[5..].Trim();
+        return text;
+    }
+
+    private static string? _mcpSession;
+
+    private static int McpStatusCode(string? origin)
+    {
+        using var http = new System.Net.Http.HttpClient { Timeout = TimeSpan.FromSeconds(20) };
+        using var content = new System.Net.Http.StringContent(
+            """{"jsonrpc":"2.0","id":99,"method":"ping"}""", Encoding.UTF8, "application/json");
+        using var request = new System.Net.Http.HttpRequestMessage(System.Net.Http.HttpMethod.Post,
+            $"http://127.0.0.1:{McpTestPort}/mcp") { Content = content };
+        request.Headers.Add("Accept", "application/json, text/event-stream");
+        if (origin is not null) request.Headers.Add("Origin", origin);
+        return (int)http.Send(request).StatusCode;
     }
 
     // ---------------- helpers ----------------

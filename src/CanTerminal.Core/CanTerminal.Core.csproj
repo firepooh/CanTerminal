@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
@@ -11,6 +11,16 @@
     <PackageReference Include="DbcParserLib" Version="1.8.0" />
     <!-- The SLCAN adapter's serial transport (USB CDC virtual COM port). -->
     <PackageReference Include="System.IO.Ports" Version="10.0.0" />
+    <!--
+      The MCP endpoint this library serves over HTTP(Streamable). It lives beside TcpApiServer
+      because it is the same thing — a transport in front of CanApi — and putting it here is what
+      lets the headless test harness stand one up without a window.
+      AddMcpServer()/WithHttpTransport()/WithTools<T>() come from the AspNetCore package's chain,
+      not from Core; its nuspec already declares Microsoft.AspNetCore.App, so no FrameworkReference
+      is needed here.
+    -->
+    <PackageReference Include="ModelContextProtocol.Core" Version="1.4.1" />
+    <PackageReference Include="ModelContextProtocol.AspNetCore" Version="1.4.1" />
   </ItemGroup>
 
   <ItemGroup>
