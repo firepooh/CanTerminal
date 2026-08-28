@@ -2,7 +2,7 @@
   "mcpServers": {
     "canterminal": {
       "type": "http",
-      "url": "http://127.0.0.1:29537/mcp"
+      "url": "http://127.0.0.1:5400/mcp"
     }
   }
 }

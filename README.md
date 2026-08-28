@@ -10,7 +10,7 @@ ValueCAN ──── icsneo40.dll ─┐
 USB2CAN SLCAN ── COM 포트 ──┴─ CanTerminal.exe (WPF 모니터)
                               ├─ Trace / Fixed 뷰, DBC 디코딩, TX 패널, CSV 저장
                               ├─ TCP JSON API (127.0.0.1:29536)  ← python 테스트
-                              └─ MCP 엔드포인트 (127.0.0.1:29537/mcp)  ← Claude Code 등
+                              └─ MCP 엔드포인트 (127.0.0.1:5400/mcp)  ← Claude Code 등
 ```
 
 ## 받기 / 빌드 / 실행
@@ -616,12 +616,13 @@ URL 하나뿐이라 PC가 바뀌어도 같습니다 — 그래서 리포의 [.mc
 있습니다(예전에는 절대 경로가 박혀 있어 클론 위치마다 고쳐야 했습니다).
 
 ```bash
-claude mcp add --transport http canterminal http://127.0.0.1:29537/mcp
+claude mcp add --transport http canterminal http://127.0.0.1:5400/mcp
 ```
 
-`Tools ▸ MCP server (for Claude)`로 켜면 엔드포인트가 열립니다. **기본은 꺼짐** — 듣는 소켓을
-여는 일이라 쓰지 않는 사람에게 열어 두지 않습니다. 포트는 `Tools ▸ MCP server port…`에서 바꾸고,
-`Copy MCP registration command`로 위 명령을 클립보드에 복사할 수 있습니다. 127.0.0.1에만 바인딩하며,
+엔드포인트는 **기본으로 켜져 있습니다** (`Tools ▸ MCP server (for Claude)`). 끄면 그 선택도
+기억합니다. 포트는 `Tools ▸ MCP server port…`에서 바꾸고, `Copy MCP registration command`로 위
+명령을 복사할 수 있습니다. 처음 쓰신다면 `Tools ▸ MCP 사용 안내`에 등록 위치(user/local/project)까지
+한 화면에 정리돼 있습니다. 127.0.0.1에만 바인딩하며,
 브라우저가 보내는 Origin이 로컬이 아니면 거절합니다(MCP 클라이언트는 Origin을 보내지 않습니다).
 
 CanTerminal.exe가 떠 있고 MCP가 켜져 있으면 Claude Code에서 다음 도구를 쓸 수 있습니다:

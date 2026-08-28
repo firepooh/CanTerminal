@@ -64,7 +64,7 @@ public partial class MainWindow : Window
     private int _historyCapacity = TraceBuffer.DefaultCapacity;
     private int _cycleMs = 100;
     private int _apiPort = 29536;
-    private int _mcpPort = 29537;
+    private int _mcpPort = 5400;
     private int _layout;                // 0 single, 1 split ↔, 2 split ↕
     private string? _txChannel;
     private string? _xcpChannel;        // channel the XCP dialog opens on

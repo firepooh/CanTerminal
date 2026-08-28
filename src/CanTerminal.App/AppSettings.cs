@@ -31,10 +31,14 @@ public sealed class AppSettings
     public bool ApiServer { get; set; } = true;
     public int ApiPort { get; set; } = 29536;
 
-    // The MCP endpoint the app serves itself. Off by default: it opens a listening socket, and
-    // someone who does not use Claude should not have one opened on their behalf.
-    public bool McpServer { get; set; }
-    public int McpPort { get; set; } = 29537;
+    // The MCP endpoint the app serves itself. On by default — the program is meant to be driven
+    // from Claude, and an endpoint nobody connects to costs a bound loopback socket. Turn it off
+    // in Tools if that is not wanted; the choice is remembered.
+    public bool McpServer { get; set; } = true;
+
+    // Away from the TCP API's 29536 rather than next to it: adjacent numbers invite a collision
+    // the moment someone moves one of them, and 5400 is clear of the usual development ports.
+    public int McpPort { get; set; } = 5400;
     public int CycleMs { get; set; } = 100;
 
     // Window placement. Zero (never saved) leaves the XAML defaults alone.

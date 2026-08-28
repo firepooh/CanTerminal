@@ -269,7 +269,11 @@ public partial class MainWindow
     /// </summary>
     private void ApplyMcpSetting()
     {
-        if (MenuMcpServer is null) return;      // fires during InitializeComponent
+        // Checked="True" in the XAML raises this from inside InitializeComponent, before the
+        // constructor has built anything — the same reason ApplyServerSetting guards on _server.
+        // Testing the menu item is not enough: that one exists by then, and it was _api that was
+        // still null. The constructor calls this again once there is something to start.
+        if (_api is null || MenuMcpServer is null) return;
 
         if (!MenuMcpServer.IsChecked)
         {
@@ -311,6 +315,14 @@ public partial class MainWindow
         }
         UpdateStatusBar();
     }
+
+    /// <summary>
+    /// Where to register, and what has to be true for it to work. Opened from the menu, and worth
+    /// having because the one thing that decides whether this works — registration scope — is a
+    /// Claude Code concept with no presence anywhere in this program.
+    /// </summary>
+    private void McpGuide_Click(object sender, RoutedEventArgs e) =>
+        new McpGuideDialog(this, _mcp?.Endpoint, _mcpPort).ShowDialog();
 
     private void CopyMcpCommand_Click(object sender, RoutedEventArgs e)
     {

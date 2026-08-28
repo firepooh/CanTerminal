@@ -1,0 +1,189 @@
+<Window x:Class="CanTerminal.App.McpGuideDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="MCP 사용 안내"
+        Icon="pack://application:,,,/CanTerminal;component/canterminal.ico"
+        Width="640" SizeToContent="Height" ResizeMode="NoResize"
+        ShowInTaskbar="False" WindowStartupLocation="CenterOwner">
+
+    <!--
+      Registration scope (user/local/project) is a Claude Code concept with no trace of it
+      anywhere in this program, so it is explained here rather than left to be discovered.
+
+      A window rather than a MessageBox: the address and the command have to be selectable, and
+      there is a copy button. The content is long, so it scrolls — but the window sizes to the
+      content until the code-behind caps it at the screen height.
+    -->
+    <Window.Resources>
+        <Style x:Key="Head" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Foreground" Value="#1E2833"/>
+            <Setter Property="Margin" Value="0,20,0,0"/>
+        </Style>
+        <Style x:Key="Body" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="11.5"/>
+            <Setter Property="Foreground" Value="#4A5764"/>
+            <Setter Property="TextWrapping" Value="Wrap"/>
+            <Setter Property="LineHeight" Value="18"/>
+            <Setter Property="Margin" Value="0,6,0,0"/>
+        </Style>
+        <Style x:Key="Inset" TargetType="Border">
+            <Setter Property="Background" Value="#F4F6F8"/>
+            <Setter Property="BorderBrush" Value="#DCE3EA"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="6"/>
+            <Setter Property="Padding" Value="12,10"/>
+            <Setter Property="Margin" Value="0,8,0,0"/>
+        </Style>
+        <Style x:Key="Mono" TargetType="TextBox">
+            <Setter Property="IsReadOnly" Value="True"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="FontFamily" Value="Consolas"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Padding" Value="0"/>
+            <Setter Property="TextWrapping" Value="NoWrap"/>
+        </Style>
+        <Style x:Key="Cell" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="11.5"/>
+            <Setter Property="Foreground" Value="#4A5764"/>
+            <Setter Property="Margin" Value="0,0,0,6"/>
+        </Style>
+    </Window.Resources>
+
+    <DockPanel Margin="18">
+        <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal"
+                    HorizontalAlignment="Right" Margin="0,16,0,0">
+            <Button Content="닫기" IsCancel="True" Width="86" Padding="0,5"/>
+            <Button Content="등록 명령 복사" x:Name="CopyButton" IsDefault="True"
+                    Width="120" Padding="0,5" Margin="8,0,0,0" Click="Copy_Click"/>
+        </StackPanel>
+
+        <ScrollViewer VerticalScrollBarVisibility="Auto">
+            <StackPanel Margin="0,0,10,0">
+
+                <!-- 1. transport -->
+                <TextBlock Text="CanTerminal 은 HTTP 방식 하나만 씁니다" Style="{StaticResource Head}"
+                           Margin="0,0,0,0"/>
+                <TextBlock Style="{StaticResource Body}"
+                           Text="앱 안에서 MCP 서버를 열고, 밖으로는 주소 하나만 냅니다."/>
+                <Border Style="{StaticResource Inset}">
+                    <TextBox x:Name="UrlBox" Style="{StaticResource Mono}" Foreground="#0F7B4F"/>
+                </Border>
+                <TextBlock Style="{StaticResource Body}"
+                           Text="이 주소에는 설치 경로도 채널 이름도 들어 있지 않습니다.&#10;그래서 PC 를 옮겨도, 장비를 바꿔 꽂아도 등록은 그대로입니다.&#10;채널을 몇 개 열든 등록은 이 하나뿐이고, 어느 채널로 보낼지는 AI 가 channel 로 고릅니다."/>
+
+                <!-- 2. scope -->
+                <TextBlock Text="어디에 등록할지 — 스코프 세 가지" Style="{StaticResource Head}"/>
+                <TextBlock Style="{StaticResource Body}" Text="AI 에게 이렇게 말하면 됩니다."/>
+                <Border Style="{StaticResource Inset}" Padding="14,12">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+
+                        <TextBlock Grid.Row="0" Grid.Column="0" FontFamily="Consolas" FontSize="11.5"
+                                   Foreground="#0F7B4F" Margin="0,0,14,6" Text="&quot;user 스코프로 등록해줘&quot;"/>
+                        <StackPanel Grid.Row="0" Grid.Column="1" Orientation="Horizontal">
+                            <TextBlock Style="{StaticResource Cell}" Text="이 PC 의 모든 폴더에서 쓰겠다"/>
+                            <Border Background="#E4F1E9" BorderBrush="#B9DCC8" BorderThickness="1"
+                                    CornerRadius="3" Padding="6,1" Margin="8,0,0,6" VerticalAlignment="Top">
+                                <TextBlock Text="권장" FontSize="10.5" Foreground="#0F7B4F"/>
+                            </Border>
+                        </StackPanel>
+
+                        <TextBlock Grid.Row="1" Grid.Column="0" FontFamily="Consolas" FontSize="11.5"
+                                   Foreground="#7A858F" Margin="0,0,14,6" Text="&quot;local 스코프로 등록해줘&quot;"/>
+                        <TextBlock Grid.Row="1" Grid.Column="1" Style="{StaticResource Cell}"
+                                   Text="이 폴더에서만, 내 PC 에만"/>
+
+                        <TextBlock Grid.Row="2" Grid.Column="0" FontFamily="Consolas" FontSize="11.5"
+                                   Foreground="#7A858F" Margin="0,0,14,0" Text="&quot;project 스코프로 등록해줘&quot;"/>
+                        <TextBlock Grid.Row="2" Grid.Column="1" Style="{StaticResource Cell}" Margin="0"
+                                   Text="이 폴더에서만, .mcp.json 을 git 으로 팀과 공유하겠다"/>
+                    </Grid>
+                </Border>
+                <TextBlock Style="{StaticResource Body}" Text="직접 치실 거면:"/>
+                <Border Style="{StaticResource Inset}">
+                    <TextBox x:Name="CommandBox" Style="{StaticResource Mono}" Foreground="#33404D"/>
+                </Border>
+
+                <!-- 3. why user scope -->
+                <TextBlock Text="user 스코프를 권하는 이유" Style="{StaticResource Head}"/>
+                <TextBlock Style="{StaticResource Body}"
+                           Text="엔드포인트가 PC 하나에 하나입니다.&#10;장비는 이 PC 에 꽂혀 있고, 어느 프로젝트에서 작업하든 같은 버스를 봅니다.&#10;그러니 등록도 PC 단위로 두는 것이 실상에 맞습니다."/>
+                <TextBlock Style="{StaticResource Body}" Margin="0,8,0,0"
+                           Text="·  어느 폴더에서 AI 를 띄우든 CAN 도구가 그대로 있습니다.&#10;·  여러 AI 세션이 동시에 붙어도 됩니다 — 각자 자기 세션을 갖고 같은 버스를 함께 봅니다.&#10;·  프로젝트를 옮길 때마다 다시 등록할 필요가 없습니다."/>
+
+                <!-- 4. preconditions -->
+                <TextBlock Text="쓰려면 이 세 가지만 맞으면 됩니다" Style="{StaticResource Head}"/>
+                <Border Style="{StaticResource Inset}" Padding="14,12">
+                    <StackPanel>
+                        <TextBlock Style="{StaticResource Cell}" Text="1   CanTerminal 이 실행 중"/>
+                        <TextBlock Style="{StaticResource Cell}" Text="2   장비에 연결됨 (Bus ▸ Connect) — 또는 로그 파일을 연 상태"/>
+                        <TextBlock Style="{StaticResource Cell}" Margin="0"
+                                   Text="3   이 메뉴의 'MCP server (for Claude)' 가 켜짐"/>
+                    </StackPanel>
+                </Border>
+                <TextBlock Style="{StaticResource Body}"
+                           Text="3번이 켜져야 주소가 열립니다. 기본으로 켜져 있고, 끄면 그 선택을 기억합니다.&#10;AI 를 먼저 띄워도 됩니다 — 나중에 켜면 그 자리에서 도구가 잡힙니다.&#10;2번이 아니어도 AI 는 붙을 수 있지만, 그때는 '연결된 장비 없음'이라고 답합니다."/>
+
+                <!-- 5. what the AI can do -->
+                <TextBlock Text="AI 가 할 수 있는 일" Style="{StaticResource Head}"/>
+                <!-- Two columns rather than runs in one line: XAML eats the leading spaces that
+                     would have separated the name from its description. -->
+                <Border Style="{StaticResource Inset}" Padding="14,12">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+
+                        <TextBlock Grid.Row="0" Grid.Column="0" FontFamily="Consolas" FontSize="11.5"
+                                   Foreground="#33404D" Margin="0,0,16,6" Text="can_status"/>
+                        <TextBlock Grid.Row="0" Grid.Column="1" Style="{StaticResource Cell}"
+                                   Text="무엇이 연결됐는지, 채널·DBC·프레임 수"/>
+
+                        <TextBlock Grid.Row="1" Grid.Column="0" FontFamily="Consolas" FontSize="11.5"
+                                   Foreground="#33404D" Margin="0,0,16,6" Text="can_send"/>
+                        <TextBlock Grid.Row="1" Grid.Column="1" Style="{StaticResource Cell}"
+                                   Text="프레임을 버스로 송신 (화면 trace 에도 보임)"/>
+
+                        <TextBlock Grid.Row="2" Grid.Column="0" FontFamily="Consolas" FontSize="11.5"
+                                   Foreground="#33404D" Margin="0,0,16,6" Text="can_recent"/>
+                        <TextBlock Grid.Row="2" Grid.Column="1" Style="{StaticResource Cell}"
+                                   Text="최근 받은 프레임 (DBC·XCP 해석 포함)"/>
+
+                        <TextBlock Grid.Row="3" Grid.Column="0" FontFamily="Consolas" FontSize="11.5"
+                                   Foreground="#33404D" Margin="0,0,16,0" Text="can_wait_for"/>
+                        <TextBlock Grid.Row="3" Grid.Column="1" Style="{StaticResource Cell}" Margin="0"
+                                   Text="특정 ID 가 올 때까지 대기"/>
+                    </Grid>
+                </Border>
+
+                <!-- 6. caveats -->
+                <TextBlock Text="알아 두실 것" Style="{StaticResource Head}"/>
+                <TextBlock Style="{StaticResource Body}"
+                           Text="읽기 전용 모드가 없습니다. 켜 두면 AI 가 실제 버스로 프레임을 보낼 수 있습니다 — 화면에 보고 계신 그 버스입니다.&#10;보내지 않게 하려면 MCP 를 끄시면 됩니다."/>
+                <TextBlock Style="{StaticResource Body}" Margin="0,8,0,0"
+                           Text="주소가 열려 있는 동안에는 이 PC 안의 다른 프로그램도 접근할 수 있습니다.&#10;바깥 네트워크에서는 닿지 않습니다 — 127.0.0.1 에만 열고, 브라우저가 보내는 Origin 이 로컬이 아니면 거절합니다."/>
+                <TextBlock Style="{StaticResource Body}" Margin="0,8,0,0"
+                           Text="파이썬 스크립트는 이 주소가 아니라 Tools ▸ API server (기본 29536) 를 씁니다. 둘은 별개이고, 같이 켜 두어도 됩니다."/>
+
+            </StackPanel>
+        </ScrollViewer>
+    </DockPanel>
+</Window>

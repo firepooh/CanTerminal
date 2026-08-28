@@ -62,7 +62,7 @@ public sealed class McpHttpServer
 
     public McpHttpState State { get; private set; } = McpHttpState.Stopped;
 
-    /// <summary>The URL to register while running, e.g. http://127.0.0.1:29537/mcp.</summary>
+    /// <summary>The URL to register while running, e.g. http://127.0.0.1:5400/mcp.</summary>
     public string? Endpoint { get; private set; }
 
     /// <summary>Why it did not start, verbatim, for the status line.</summary>
