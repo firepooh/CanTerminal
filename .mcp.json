@@ -1,12 +1,8 @@
 {
   "mcpServers": {
     "canterminal": {
-      "command": "dotnet",
-      "args": [
-        "C:\\work\\Tools\\CanTerminal\\src\\CanTerminal.Mcp\\bin\\Debug\\net10.0\\CanTerminal.Mcp.dll",
-        "--port",
-        "29536"
-      ]
+      "type": "http",
+      "url": "http://127.0.0.1:29537/mcp"
     }
   }
 }

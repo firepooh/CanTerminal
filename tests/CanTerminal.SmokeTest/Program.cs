@@ -1,9 +1,10 @@
 using CanTerminal.Core;
+using CanTerminal.Core.Mcp;
 using CanTerminal.Core.Xcp;
 
 // Headless harness: virtual bus + TCP API server, no GUI.
 // Used by tests/smoke_test.py; also handy for developing python tests without hardware.
-// Usage: CanTerminal.SmokeTest [port]
+// Usage: CanTerminal.SmokeTest [port]   (the MCP endpoint is served on port+1)
 //
 // The XCP profile is wired to req 0x601 / rsp 0x701: the virtual bus echoes every transmitted
 // frame back with ArbId+0x100, so 0x601 commands surface on 0x701 as if a slave had answered.
@@ -31,6 +32,11 @@ var api = new CanApi(hub)
 using var server = new TcpApiServer(hub, api);
 server.Info += msg => Console.Error.WriteLine($"[server] {msg}");
 server.Start(port);
+
+// The same CanApi behind both front ends, exactly as the window wires it — which is what makes
+// this harness able to test the MCP endpoint rather than only the line protocol.
+var mcp = new McpHttpServer(api, port + 1);
+if (!mcp.Start()) Console.Error.WriteLine($"[server] MCP endpoint failed: {mcp.FailureDetail}");
 
 Console.WriteLine($"READY {port}");
 Console.Out.Flush();

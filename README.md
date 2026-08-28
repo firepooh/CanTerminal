@@ -10,7 +10,7 @@ ValueCAN ──── icsneo40.dll ─┐
 USB2CAN SLCAN ── COM 포트 ──┴─ CanTerminal.exe (WPF 모니터)
                               ├─ Trace / Fixed 뷰, DBC 디코딩, TX 패널, CSV 저장
                               ├─ TCP JSON API (127.0.0.1:29536)  ← python 테스트
-                              └─ CanTerminal.Mcp (stdio MCP 서버) ← Claude Code 등
+                              └─ MCP 엔드포인트 (127.0.0.1:29537/mcp)  ← Claude Code 등
 ```
 
 ## 받기 / 빌드 / 실행
@@ -24,7 +24,9 @@ USB2CAN SLCAN ── COM 포트 ──┴─ CanTerminal.exe (WPF 모니터)
 | `CanTerminal-win-x64.zip` | 실행 PC에 **.NET 10 Desktop Runtime** 필요 (작음) |
 | `CanTerminal-win-x64-standalone.zip` | 런타임 포함, 설치 없이 실행 (큼) |
 
-둘 다 `CanTerminal.exe` + `CanTerminal.Mcp.exe` + `python/` 클라이언트가 들어 있습니다.
+둘 다 `CanTerminal.exe` + `python/` 클라이언트가 들어 있습니다 (MCP는 앱이 직접 서빙하므로
+별도 실행 파일이 없습니다). 작은 쪽은 **.NET 10 Desktop Runtime과 ASP.NET Core Runtime이 둘 다**
+필요합니다 — MCP 엔드포인트가 후자를 씁니다.
 **`icsneo40.dll`은 넣지 않습니다** — Intrepid 드라이버 설치본의 일부입니다. 실장비를 쓰려면
 드라이버가 필요하고, 로그 열람(ASC/MDF4)과 가상 버스는 없어도 동작합니다.
 
@@ -609,9 +611,20 @@ req/rsp(설정 시 broadcast) ID의 프레임만 Trace/Fixed 뷰에 표시합니
 
 ## MCP 서버 (Claude Code 연동)
 
-리포 루트의 [.mcp.json](.mcp.json)이 이미 설정되어 있습니다 (**절대 경로이므로 리포를 다른 위치에
-클론했다면 경로를 수정할 것**). CanTerminal.exe가 떠 있으면
-Claude Code에서 다음 도구를 사용할 수 있습니다:
+**MCP 서버는 CanTerminal.exe가 직접 서빙합니다.** 별도 실행 파일이 없고, 등록에 들어가는 값은
+URL 하나뿐이라 PC가 바뀌어도 같습니다 — 그래서 리포의 [.mcp.json](.mcp.json)을 그대로 커밋해 둘 수
+있습니다(예전에는 절대 경로가 박혀 있어 클론 위치마다 고쳐야 했습니다).
+
+```bash
+claude mcp add --transport http canterminal http://127.0.0.1:29537/mcp
+```
+
+`Tools ▸ MCP server (for Claude)`로 켜면 엔드포인트가 열립니다. **기본은 꺼짐** — 듣는 소켓을
+여는 일이라 쓰지 않는 사람에게 열어 두지 않습니다. 포트는 `Tools ▸ MCP server port…`에서 바꾸고,
+`Copy MCP registration command`로 위 명령을 클립보드에 복사할 수 있습니다. 127.0.0.1에만 바인딩하며,
+브라우저가 보내는 Origin이 로컬이 아니면 거절합니다(MCP 클라이언트는 Origin을 보내지 않습니다).
+
+CanTerminal.exe가 떠 있고 MCP가 켜져 있으면 Claude Code에서 다음 도구를 쓸 수 있습니다:
 
 - `can_status` — 연결 상태/채널/DBC 확인
 - `can_send` — 프레임 송신 (모니터 trace에도 표시)
@@ -624,8 +637,8 @@ Claude Code에서 다음 도구를 사용할 수 있습니다:
 python tests/smoke_test.py
 ```
 
-하드웨어 없이 가상 버스로 TCP API 11항목 + XCP 프로파일 10항목 + MCP 10항목을 종단간 검증합니다.
-Debug 출력이 실행 중인 MCP 서버에 잠겨 있으면 `CANTERMINAL_CONFIG=Release`로 릴리스 바이너리를
+하드웨어 없이 가상 버스로 TCP API 11항목 + XCP 프로파일 10항목 + MCP 10항목(HTTP 왕복)을 종단간
+검증합니다. Debug 출력이 실행 중인 프로세스에 잠겨 있으면 `CANTERMINAL_CONFIG=Release`로 릴리스 바이너리를
 대신 씁니다.
 
 ```bash

@@ -1,13 +1,13 @@
 """End-to-end smoke test (no hardware needed).
 
-Launches the headless harness (virtual bus + TCP API server), then exercises:
+Launches the headless harness (virtual bus + TCP API server + MCP endpoint), then exercises:
   1. the raw TCP JSON API through canterminal_can.CanTerminalClient
-  2. the MCP stdio server (initialize / tools/list / tools/call)
+  2. the MCP endpoint over HTTP (initialize / tools/list / tools/call)
 
 Run:  python tests/smoke_test.py   (from the repo root, after dotnet build)
 
-Set CANTERMINAL_CONFIG=Release to test the release binaries instead — useful when a running
-MCP server is holding the Debug output open.
+Set CANTERMINAL_CONFIG=Release to test the release binaries instead — useful when the Debug
+output is held open by something already running.
 """
 
 import json
@@ -15,6 +15,8 @@ import os
 import subprocess
 import sys
 import time
+import urllib.error
+import urllib.request
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "python"))
@@ -25,8 +27,8 @@ PORT = 39999
 CONFIG = os.environ.get("CANTERMINAL_CONFIG", "Debug")
 HARNESS = os.path.join(ROOT, "tests", "CanTerminal.SmokeTest", "bin", CONFIG,
                        "net10.0", "CanTerminal.SmokeTest.exe")
-MCP_DLL = os.path.join(ROOT, "src", "CanTerminal.Mcp", "bin", CONFIG,
-                       "net10.0", "CanTerminal.Mcp.dll")
+# The monitor serves MCP itself now; the harness puts it one port above the TCP API.
+MCP_URL = f"http://127.0.0.1:{PORT + 1}/mcp"
 
 failures = []
 
@@ -165,33 +167,56 @@ def test_xcp() -> None:
 
 
 class McpProc:
+    """The MCP endpoint the monitor serves itself, over Streamable HTTP.
+
+    There is no process to launch: the relay this used to drive is gone. Two things a client of
+    this transport has to get right, and so does this one — the session id handed back at
+    initialize must ride on every later request, and a reply arrives either as a JSON body or
+    inside an SSE frame, at the server's discretion.
+    """
+
     def __init__(self) -> None:
-        self.proc = subprocess.Popen(
-            ["dotnet", MCP_DLL, "--port", str(PORT)],
-            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-            text=True, encoding="utf-8", bufsize=1)
         self._id = 0
+        self._session = None
+
+    def _post(self, msg: dict) -> tuple[int, str, str]:
+        headers = {
+            "Content-Type": "application/json",
+            "Accept": "application/json, text/event-stream",
+        }
+        if self._session:
+            headers["Mcp-Session-Id"] = self._session
+        req = urllib.request.Request(MCP_URL, data=json.dumps(msg).encode(),
+                                     headers=headers, method="POST")
+        try:
+            with urllib.request.urlopen(req, timeout=20) as r:
+                sid = r.headers.get("Mcp-Session-Id")
+                if sid:
+                    self._session = sid
+                return r.status, r.headers.get("Content-Type", ""), r.read().decode()
+        except urllib.error.HTTPError as e:
+            return e.code, e.headers.get("Content-Type", ""), e.read().decode()
 
     def rpc(self, method: str, params: dict | None = None) -> dict:
         self._id += 1
         msg = {"jsonrpc": "2.0", "id": self._id, "method": method}
         if params is not None:
             msg["params"] = params
-        self.proc.stdin.write(json.dumps(msg) + "\n")
-        self.proc.stdin.flush()
-        line = self.proc.stdout.readline()
-        return json.loads(line)
+        status, ctype, text = self._post(msg)
+        if status != 200:
+            raise RuntimeError(f"{method} -> HTTP {status}: {text[:200]}")
+        if "text/event-stream" in ctype:
+            for line in text.splitlines():
+                if line.startswith("data:"):
+                    return json.loads(line[5:].strip())
+            raise RuntimeError(f"no data frame in SSE reply: {text[:200]}")
+        return json.loads(text)
 
     def notify(self, method: str) -> None:
-        self.proc.stdin.write(json.dumps({"jsonrpc": "2.0", "method": method}) + "\n")
-        self.proc.stdin.flush()
+        self._post({"jsonrpc": "2.0", "method": method})
 
     def close(self) -> None:
-        try:
-            self.proc.stdin.close()
-            self.proc.wait(timeout=5)
-        except Exception:
-            self.proc.kill()
+        pass                                    # nothing of ours is running
 
 
 def tool_text(reply: dict) -> str:
@@ -199,7 +224,7 @@ def tool_text(reply: dict) -> str:
 
 
 def test_mcp() -> None:
-    print("MCP stdio server:")
+    print("MCP endpoint (HTTP, served by the app):")
     mcp = McpProc()
     try:
         init = mcp.rpc("initialize", {
@@ -211,15 +236,17 @@ def test_mcp() -> None:
         mcp.notify("notifications/initialized")
 
         tools = mcp.rpc("tools/list")
-        names = [t["name"] for t in tools["result"]["tools"]]
-        check("tools/list", names == ["can_status", "can_send", "can_recent", "can_wait_for"], str(names))
+        # By name, not by order: the order is the server's business and this is about coverage.
+        names = sorted(t["name"] for t in tools["result"]["tools"])
+        check("tools/list", names == ["can_recent", "can_send", "can_status", "can_wait_for"], str(names))
 
         st = mcp.rpc("tools/call", {"name": "can_status", "arguments": {}})
-        check("can_status", '"connected": true' in tool_text(st), tool_text(st))
+        check("can_status", '"connected":true' in tool_text(st).replace(": ", ":"), tool_text(st))
 
         sent = mcp.rpc("tools/call", {"name": "can_send",
                                       "arguments": {"channel": "CAN1", "id": "0x321", "data": "CAFE"}})
-        check("can_send", sent["result"].get("isError") is False, tool_text(sent))
+        # Absent means false, per the MCP spec — only an explicit true is a failure.
+        check("can_send", sent["result"].get("isError") is not True, tool_text(sent))
 
         # target the periodic generator, not our own echo: each MCP tool call opens its own
         # TCP connection, so waiting for a ~5 ms echo would race with that setup

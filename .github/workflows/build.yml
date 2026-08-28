@@ -65,12 +65,6 @@ jobs:
           --self-contained false -p:PublishSingleFile=true
           -p:Version=${{ steps.ver.outputs.version }}
           -o fdd/app
-      - name: Publish MCP server (framework-dependent)
-        run: >
-          dotnet publish src/CanTerminal.Mcp/CanTerminal.Mcp.csproj -c Release -r win-x64
-          --self-contained false -p:PublishSingleFile=true
-          -p:Version=${{ steps.ver.outputs.version }}
-          -o fdd/mcp
 
       # ── self-contained(큼, .NET 런타임 포함 — 런타임 설치 없이 실행) ──
       - name: Publish app (self-contained)
@@ -80,27 +74,19 @@ jobs:
           -p:EnableCompressionInSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
           -p:Version=${{ steps.ver.outputs.version }}
           -o sc/app
-      - name: Publish MCP server (self-contained)
-        run: >
-          dotnet publish src/CanTerminal.Mcp/CanTerminal.Mcp.csproj -c Release -r win-x64
-          --self-contained true -p:PublishSingleFile=true
-          -p:EnableCompressionInSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
-          -p:Version=${{ steps.ver.outputs.version }}
-          -o sc/mcp
 
       # 앱 + MCP 서버 + python 클라이언트를 한 zip 으로 묶는다.
-      #  - MCP 서버는 앱 옆에 있어야 .mcp.json 의 상대 경로가 성립한다.
+      #  - MCP 는 앱이 직접 HTTP 로 서빙한다 — 함께 넣을 실행 파일이 없다.
       #  - icsneo40.dll 은 넣지 않는다: Intrepid 드라이버 설치본의 일부이고 시스템에 깔린다.
       - name: Package
         shell: pwsh
         run: |
           New-Item -ItemType Directory dist | Out-Null
 
-          function New-Stage([string]$name, [string]$appDir, [string]$mcpDir) {
+          function New-Stage([string]$name, [string]$appDir) {
             $stage = "stage/$name"
             New-Item -ItemType Directory $stage -Force | Out-Null
             Copy-Item "$appDir/CanTerminal.exe" $stage
-            Copy-Item "$mcpDir/CanTerminal.Mcp.exe" $stage
             Copy-Item 'README.md', 'LICENSE', 'THIRD-PARTY-NOTICES.md' $stage
             # 파이썬 테스트에서 쓰는 경량 클라이언트 (pip install -e python).
             # __pycache__ 는 앞선 테스트 단계가 만든 것이고, 그 러너의 파이썬 버전에만
@@ -111,8 +97,8 @@ jobs:
             Compress-Archive -Path "$stage/*" -DestinationPath "dist/$name.zip"
           }
 
-          New-Stage 'CanTerminal-win-x64' 'fdd/app' 'fdd/mcp'
-          New-Stage 'CanTerminal-win-x64-standalone' 'sc/app' 'sc/mcp'
+          New-Stage 'CanTerminal-win-x64' 'fdd/app'
+          New-Stage 'CanTerminal-win-x64-standalone' 'sc/app'
 
           Write-Host '--- 배포 zip ---'
           Get-ChildItem dist | Format-Table Name, @{n='MB';e={[math]::Round($_.Length/1MB,1)}}
@@ -137,7 +123,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: >
           gh release create '${{ github.ref_name }}'
-          'dist/CanTerminal-win-x64.zip#CanTerminal (win-x64, .NET 10 Desktop Runtime 필요)'
+          'dist/CanTerminal-win-x64.zip#CanTerminal (win-x64, .NET 10 Desktop Runtime + ASP.NET Core Runtime 필요)'
           'dist/CanTerminal-win-x64-standalone.zip#CanTerminal standalone (런타임 포함)'
           --title 'CanTerminal ${{ github.ref_name }}'
           --notes '실장비를 쓰려면 Intrepid 드라이버(icsneo40.dll)가 설치돼 있어야 합니다. 로그 파일 열람(ASC/MDF4)과 가상 버스는 드라이버 없이도 동작합니다.'
